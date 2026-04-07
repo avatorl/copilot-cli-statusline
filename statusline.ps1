@@ -224,14 +224,14 @@ function Get-UsageAnsiColor($value) {
 # DISPLAY COMPONENT FUNCTIONS
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Formats a token value with prefix and threshold coloring (e.g. "in 2.3M" in red).
+# Formats a token value with prefix, coloring only the value (e.g. "in 2.3M" where only "2.3M" is colored).
 function Format-ColoredToken([string]$prefix, $value) {
     $number = ConvertTo-NullableInt $value
     if ($null -eq $number) { return $null }
-    $text = "$prefix $(Format-CompactTokens $number)"
+    $formattedValue = Format-CompactTokens $number
     $color = Get-TokenAnsiColor $number
-    if ($color) { return "$color$text$rst" }
-    return $text
+    if ($color) { return "$prefix $color$formattedValue$rst" }
+    return "$prefix $formattedValue"
 }
 
 # Renders a fixed-width 10-char bar chart from a percentage (0-100).
