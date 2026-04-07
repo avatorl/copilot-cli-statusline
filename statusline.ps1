@@ -235,6 +235,7 @@ function Format-ColoredToken([string]$prefix, $value) {
 }
 
 # Renders a fixed-width 10-char bar chart from a percentage (0-100).
+# Filled portion uses the provided color, unfilled portion is grey.
 function Get-Bar($value, [string]$ansiColor, [int]$width = 10) {
     $number = ConvertTo-NullableInt $value
     if ($null -eq $number) { $number = 0 }
@@ -244,8 +245,8 @@ function Get-Bar($value, [string]$ansiColor, [int]$width = 10) {
     $empty = $width - $filled
 
     $filledPart = if ($filled -gt 0) { $script:filledChar * $filled } else { "" }
-    $emptyPart = if ($empty -gt 0) { $script:unfilledChar * $empty } else { "" }
-    return "$ansiColor$filledPart$emptyPart$rst"
+    $emptyPart = if ($empty -gt 0) { $script:filledChar * $empty } else { "" }
+    return "$ansiColor$filledPart$rst$script:dim$emptyPart$rst"
 }
 
 # Joins non-empty segments with dim pipe separators.
