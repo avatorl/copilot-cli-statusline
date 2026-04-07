@@ -1,3 +1,7 @@
+# ─── Configuration ────────────────────────────────────────────────────────────
+# Set to $true to log raw stdin JSON to statusline.stdin.log (for debugging).
+$DebugLog = $true
+
 # Copilot CLI Status Line Script (Windows PowerShell)
 #
 # Renders a two-line status bar from Copilot's JSON payload piped to stdin.
@@ -112,8 +116,9 @@ function ConvertFrom-JsonObjectOrNull([string]$raw) {
     return $null
 }
 
-# Appends timestamped raw stdin to a log file for debugging.
+# Appends timestamped raw stdin to a log file when debug logging is enabled.
 function Write-StdinLog([string]$raw) {
+    if (-not $script:DebugLog) { return }
     if ([string]::IsNullOrWhiteSpace($raw)) { return }
     try {
         $timestamp = (Get-Date).ToString("s")
