@@ -425,11 +425,6 @@ $daysInMonth = [DateTime]::DaysInMonth($now.Year, $now.Month)
 $elapsedDays = $now.Day
 $monthPct = [math]::Round($elapsedDays / $daysInMonth * 100, 1)
 
-# Quota vs month segment: "Q 77% / M 33%"
-$quotaSegment = if ($null -ne $usedPct) {
-    "Q $([math]::Round($usedPct))% / M $([math]::Round($monthPct))%"
-} else { "Q ? / M ?" }
-
 # Calendar pace visualization: elapsed days as solid grey █, remaining as hatched ░,
 # with colored filled bars overlaid showing days ahead/behind quota pace.
 # Today is always included in the colored section.
@@ -487,10 +482,9 @@ if ($null -ne $usedPct) {
 #     $paceSegment = "$dim($elapsedDays/$daysInMonth)$rst"
 # }
 
-# Append token summary, quota, and pace to line 1.
+# Append token summary and pace to line 1.
 $contextSegment = Get-ContextSummary $contextPayload
 $line1Segments.Add($contextSegment)
-$line1Segments.Add($quotaSegment)
 $line1Segments.Add($paceSegment)
 $line1 = Join-StatusSegments $line1Segments
 
