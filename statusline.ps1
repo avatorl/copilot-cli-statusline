@@ -432,8 +432,10 @@ $quotaSegment = if ($null -ne $usedPct) {
 
 # Calendar pace visualization: elapsed days as solid grey █, remaining as hatched ░,
 # with colored filled bars overlaid showing days ahead/behind quota pace.
-# Behind (green): colored bars replace solid grey to the left of today.
-# Ahead (red): colored bars replace hatched grey to the right of today.
+# Today is always included in the colored section.
+# Behind (green): colored bars include today and N-1 days before.
+# Ahead (red): colored bars include today and N-1 days after.
+# On pace (<1 day): today's bar is yellow.
 if ($null -ne $usedPct) {
     $diff = $usedPct - $monthPct
     $daysDelta = [math]::Round($daysInMonth * ([math]::Abs($diff) / 100.0), 1)
@@ -441,25 +443,25 @@ if ($null -ne $usedPct) {
     $todayIndex = $elapsedDays - 1  # 0-based position of today
 
     if ($diff -lt 0 -and $daysDelta -ge 1) {
-        # Behind (good): green bars overlay solid grey, left of today
-        $actualBars = [math]::Min($barCount, $todayIndex)
-        $solidLeft = $todayIndex - $actualBars
-        $hatchedRight = $daysInMonth - $todayIndex - 1
-        $paceCalendar = "$dim$("█" * $solidLeft)$rst$behindColor$("█" * $actualBars)$rst$dim█$("░" * $hatchedRight)$rst"
+        # Behind (good): green bars include today and days before
+        $actualBars = [math]::Min($barCount, $elapsedDays)  # include today
+        $solidLeft = $elapsedDays - $actualBars
+        $hatchedRight = $daysInMonth - $elapsedDays
+        $paceCalendar = "$dim$("█" * $solidLeft)$rst$behindColor$("█" * $actualBars)$rst$dim$("░" * $hatchedRight)$rst"
         $paceSegment = "$paceCalendar $behindColor$('{0:0.0}' -f $daysDelta) days $behindText$rst"
     } elseif ($diff -gt 0 -and $daysDelta -ge 1) {
-        # Ahead (bad): red bars overlay hatched grey, right of today
-        $maxBars = $daysInMonth - $todayIndex - 1
+        # Ahead (bad): red bars include today and days after
+        $maxBars = $daysInMonth - $elapsedDays + 1  # include today
         $actualBars = [math]::Min($barCount, $maxBars)
-        $solidLeft = $todayIndex + 1
-        $hatchedRight = $daysInMonth - $solidLeft - $actualBars
+        $solidLeft = $elapsedDays - 1
+        $hatchedRight = $daysInMonth - $elapsedDays - $actualBars + 1
         $paceCalendar = "$dim$("█" * $solidLeft)$rst$aheadColor$("█" * $actualBars)$rst$dim$("░" * $hatchedRight)$rst"
         $paceSegment = "$paceCalendar $aheadColor$('{0:0.0}' -f $daysDelta) days $aheadText$rst"
     } else {
-        # On pace (within 1 day): solid elapsed, hatched remaining
-        $solidLeft = $todayIndex + 1
-        $hatchedRight = $daysInMonth - $solidLeft
-        $paceCalendar = "$dim$("█" * $solidLeft)$("░" * $hatchedRight)$rst"
+        # On pace (within 1 day): mark today with yellow, rest is grey
+        $solidLeft = $elapsedDays - 1
+        $hatchedRight = $daysInMonth - $elapsedDays
+        $paceCalendar = "$dim$("█" * $solidLeft)$rst$onPaceColor█$rst$dim$("░" * $hatchedRight)$rst"
         $paceSegment = "$paceCalendar $onPaceColor$onPaceIcon $onPaceText$rst"
     }
 } else {
