@@ -4,11 +4,10 @@ $DebugLog = $false
 
 # Copilot CLI Status Line Script (Windows PowerShell)
 #
-# Renders a three-line status bar from Copilot's JSON payload piped to stdin.
+# Renders a two-line status bar from Copilot's JSON payload piped to stdin.
 #
-# LINE 1: model | context bar % size | duration | p.req. | in/out tokens
+# LINE 1: model | context bar % size | duration | p.req. | in/out tokens | pace calendar | days ahead/behind
 # LINE 2: cwd path | +lines -lines
-# LINE 3: pace calendar bars | days ahead/behind
 #
 # ─── STDIN PAYLOAD PARAMETERS ────────────────────────────────────────────────
 #
@@ -445,7 +444,7 @@ if ($null -ne $usedPct) {
         $solidLeft = $elapsedDays - $actualBars
         $hatchedRight = $daysInMonth - $elapsedDays
         $paceCalendar = "$dim$("█" * $solidLeft)$rst$behindColor$("█" * $actualBars)$rst$dim$("░" * $hatchedRight)$rst"
-        $paceSegment = "$paceCalendar $behindColor$('{0:0.0}' -f $daysDelta) days $behindText$rst"
+        $paceSegment = "$paceCalendar $behindColor$('{0:0.0}' -f $daysDelta) days $behindText monthly quota$rst"
     } elseif ($diff -gt 0 -and $daysDelta -ge 1) {
         # Ahead (bad): red bars include today and days after
         $maxBars = $daysInMonth - $elapsedDays + 1  # include today
@@ -453,7 +452,7 @@ if ($null -ne $usedPct) {
         $solidLeft = $elapsedDays - 1
         $hatchedRight = $daysInMonth - $elapsedDays - $actualBars + 1
         $paceCalendar = "$dim$("█" * $solidLeft)$rst$aheadColor$("█" * $actualBars)$rst$dim$("░" * $hatchedRight)$rst"
-        $paceSegment = "$paceCalendar $aheadColor$('{0:0.0}' -f $daysDelta) days $aheadText$rst"
+        $paceSegment = "$paceCalendar $aheadColor$('{0:0.0}' -f $daysDelta) days $aheadText monthly quota$rst"
     } else {
         # On pace (within 1 day): mark today with yellow, rest is grey
         $solidLeft = $elapsedDays - 1
@@ -484,9 +483,10 @@ if ($null -ne $usedPct) {
 #     $paceSegment = "$dim($elapsedDays/$daysInMonth)$rst"
 # }
 
-# Append token summary to line 1.
+# Append token summary and pace to line 1.
 $contextSegment = Get-ContextSummary $contextPayload
 $line1Segments.Add($contextSegment)
+$line1Segments.Add($paceSegment)
 $line1 = Join-StatusSegments $line1Segments
 
 # ─── Line 2: Path and lines changed ─────────────────────────────────────────
@@ -495,10 +495,6 @@ $line2Parts = @($workspaceDisplayPath)
 $linesChanged = Get-LinesChangedStats $contextPayload
 if ($linesChanged) { $line2Parts += $linesChanged }
 
-# ─── Line 3: Pace calendar ───────────────────────────────────────────────────
-$line3 = $paceSegment
-
 # ─── Output ──────────────────────────────────────────────────────────────────
 Write-Output $line1
 Write-Output ($line2Parts -join " | ")
-Write-Output $line3
