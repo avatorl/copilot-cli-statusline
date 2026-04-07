@@ -444,7 +444,7 @@ if ($null -ne $usedPct) {
         $solidLeft = $elapsedDays - $actualBars
         $hatchedRight = $daysInMonth - $elapsedDays
         $paceCalendar = "$dim$("█" * $solidLeft)$rst$behindColor$("█" * $actualBars)$rst$dim$("░" * $hatchedRight)$rst"
-        $paceSegment = "$paceCalendar $behindColor$('{0:0.0}' -f $daysDelta) days $behindText monthly quota$rst"
+        $paceSegment = "Monthly quota: $paceCalendar $behindColor$('{0:0.0}' -f $daysDelta) days $behindText$rst"
     } elseif ($diff -gt 0 -and $daysDelta -ge 1) {
         # Ahead (bad): red bars include today and days after
         $maxBars = $daysInMonth - $elapsedDays + 1  # include today
@@ -452,13 +452,13 @@ if ($null -ne $usedPct) {
         $solidLeft = $elapsedDays - 1
         $hatchedRight = $daysInMonth - $elapsedDays - $actualBars + 1
         $paceCalendar = "$dim$("█" * $solidLeft)$rst$aheadColor$("█" * $actualBars)$rst$dim$("░" * $hatchedRight)$rst"
-        $paceSegment = "$paceCalendar $aheadColor$('{0:0.0}' -f $daysDelta) days $aheadText monthly quota$rst"
+        $paceSegment = "Monthly quota: $paceCalendar $aheadColor$('{0:0.0}' -f $daysDelta) days $aheadText$rst"
     } else {
-        # On pace (within 1 day): mark today with yellow, rest is grey
+        # On pace (within 1 day): mark today with yellow, show "on pace" text
         $solidLeft = $elapsedDays - 1
         $hatchedRight = $daysInMonth - $elapsedDays
         $paceCalendar = "$dim$("█" * $solidLeft)$rst$onPaceColor█$rst$dim$("░" * $hatchedRight)$rst"
-        $paceSegment = "$paceCalendar $onPaceColor$onPaceIcon $onPaceText$rst"
+        $paceSegment = "Monthly quota: $paceCalendar $onPaceColor$onPaceText$rst"
     }
 } else {
     $paceSegment = "$dim($elapsedDays/$daysInMonth)$rst"
