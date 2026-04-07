@@ -1,6 +1,6 @@
 # Copilot CLI Status Line
 
-A PowerShell status line for [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) that displays real-time session metrics, quota pacing, and workspace info directly in your terminal.
+A Windows PowerShell status line for [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) that renders live session metrics, workspace stats, and Copilot quota pacing directly in the terminal.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 ![PowerShell 7+](https://img.shields.io/badge/PowerShell-7%2B-5391FE)
@@ -8,64 +8,78 @@ A PowerShell status line for [GitHub Copilot CLI](https://docs.github.com/en/cop
 
 ## What It Shows
 
-The status line renders two lines at the bottom of your Copilot CLI session:
+The current script renders **two lines**:
 
-```
-gpt-5.4 (high) | ███░░░░░░░ 22% 400K | 54m | 5 p.req. | in 1.7M out 27K | Q 14% / M 23% | █ █ █ 2.9 days behind
+```text
+gpt-5.4 (high) | ██████████ 22% 400K | in 1.7M out 27K | 54m | 5 p.req. | Quota: ████████░░░░░░░░░░░░░░░░░░░░░░ 3.2 days behind
 D:\GITHUB\my-project | +695 -146
 ```
 
-### Line 1 — Session Metrics
+### Line 1 — Session Status
 
 | Segment | Description |
 |---------|-------------|
-| **Model** | Active model display name (e.g. `gpt-5.4 (high)`) |
-| **Context Bar** | Visual bar + percentage + window size showing context usage |
-| **Duration** | Session wall-clock time (rounded to whole minutes) |
-| **Premium Requests** | Count of premium requests used this session |
-| **Tokens In/Out** | Cumulative input/output tokens with color thresholds |
-| **Q% / M%** | Quota used vs. month elapsed (calendar pacing) |
-| **Pace Bars** | Colored blocks showing days ahead/behind quota pace |
+| **Model** | `model.display_name`, falling back to `model.id` |
+| **Context usage** | 10-cell bar, rounded percent used, and context window size |
+| **Tokens** | Cumulative `in` / `out` token totals |
+| **Duration** | Session wall-clock time rounded to whole minutes |
+| **Premium requests** | `cost.total_premium_requests` |
+| **Quota** | Month calendar overlay showing quota pace relative to the current day |
 
-### Line 2 — Workspace
+### Line 2 — Workspace Status
 
 | Segment | Description |
 |---------|-------------|
-| **Path** | Current working directory |
-| **Lines Changed** | Lines added (green) and removed (red) this session |
+| **Path** | `cwd`, falling back to `workspace.current_dir` |
+| **Lines changed** | `+added` in green and `-removed` in red from the Copilot payload |
 
-### Color Coding
+## Quota Calendar
 
-- **Token counts**: bright yellow ≥10K, yellow ≥100K, red ≥1M
-- **Context usage**: green <75%, yellow ≥75%, red ≥90%
-- **Pace bars**: green = behind pace (under budget, good), yellow = on pace, red = ahead of pace (over budget)
+The quota segment renders the current month as a compact calendar:
+
+- **Solid grey `█`** = elapsed days
+- **Hatched grey `░`** = remaining days
+- **Green overlay** = behind quota pace (good)
+- **Red overlay** = ahead of quota pace
+- **Yellow today bar + `on pace`** = within 1 day of pace
+
+The colored section always includes **today**. For example, **3 days behind** colors today plus the two preceding days.
+
+If the quota API is unavailable, the script falls back to a dim `Quota: day/month` indicator.
+
+## Color Rules
+
+- **Context bar**: green under 75%, yellow at 75%+, red at 90%+
+- **Unused context bar cells**: solid grey
+- **Token values only** are colored: bright yellow at 10K+, yellow at 100K+, red at 1M+
+- **Quota pace**: green = behind, yellow = on pace, red = ahead
 
 ## Requirements
 
-- **Windows** (uses `.cmd` wrapper)
+- **Windows**
 - **[PowerShell 7+](https://github.com/PowerShell/PowerShell/releases)** (`pwsh.exe`)
 - **GitHub Copilot CLI** with the `STATUS_LINE` experimental flag enabled
-- A terminal that supports **ANSI escape codes** and **Unicode block characters** (Windows Terminal recommended)
+- A terminal with ANSI color and Unicode block character support (Windows Terminal works well)
 
 ## Installation
 
-### 1. Clone or download this repository
+### 1. Clone or copy the files
 
 ```bash
 git clone https://github.com/avatorl/copilot-cli-statusline.git
 ```
 
-Place the files anywhere on your system, for example:
+Example destination:
 
-```
+```text
 C:\Users\<you>\.copilot\statusline\
 ├── statusline.ps1
 └── statusline.cmd
 ```
 
-### 2. Update `statusline.cmd` (if needed)
+### 2. Verify `statusline.cmd`
 
-The `.cmd` wrapper uses `%~dp0` to find `statusline.ps1` in the same directory. If your `pwsh.exe` is not at the default location, edit the path in `statusline.cmd`:
+The wrapper locates `statusline.ps1` from its own directory using `%~dp0`. If PowerShell 7 is installed in a different location, update the `pwsh.exe` path:
 
 ```cmd
 @echo off
@@ -74,15 +88,12 @@ The `.cmd` wrapper uses `%~dp0` to find `statusline.ps1` in the same directory. 
 
 ### 3. Configure Copilot CLI
 
-Edit your Copilot CLI config file at `~/.copilot/config.json`. Add or update these fields:
+Edit `~/.copilot/config.json`:
 
 ```jsonc
 {
-  // Enable experimental features
   "experimental": true,
   "experimental_flags": ["STATUS_LINE"],
-
-  // Point to the statusline.cmd wrapper
   "statusLine": {
     "type": "command",
     "command": "C:\\Users\\<you>\\.copilot\\statusline\\statusline.cmd"
@@ -90,41 +101,58 @@ Edit your Copilot CLI config file at `~/.copilot/config.json`. Add or update the
 }
 ```
 
-> **Important**: Use the full absolute path to `statusline.cmd` with double backslashes in JSON.
+Use an absolute path and escape backslashes in JSON.
 
 ### 4. Restart Copilot CLI
 
-Launch a new Copilot CLI session. The status line should appear at the bottom of your terminal.
+Start a new Copilot CLI session and the status line should appear automatically.
+
+## Local Testing
+
+There is no automated test suite. The script is intended to be tested by piping sample payloads into `statusline.ps1`.
+
+```powershell
+# Full payload
+'{"cwd":"D:\\TEST","model":{"id":"gpt-5.4","display_name":"gpt-5.4 (high)"},"workspace":{"current_dir":"D:\\TEST"},"cost":{"total_duration_ms":3241747,"total_lines_added":100,"total_lines_removed":50,"total_premium_requests":5},"context_window":{"total_input_tokens":1744196,"total_output_tokens":26870,"context_window_size":400000,"used_percentage":22}}' | pwsh -NoProfile -File .\statusline.ps1
+
+# Minimal payload
+'{"context_window":{"context_window_size":400000,"used_percentage":0}}' | pwsh -NoProfile -File .\statusline.ps1
+
+# Empty stdin
+echo $null | pwsh -NoProfile -File .\statusline.ps1
+```
 
 ## How It Works
 
-1. Copilot CLI pipes a JSON payload to the script's stdin on each status refresh
-2. The script parses session metadata (model, tokens, duration, lines changed, context usage)
-3. It fetches your Copilot quota from the GitHub API (`/copilot_internal/user`)
-4. It calculates pacing: how your quota usage compares to the calendar month progress
-5. It renders two ANSI-colored lines to stdout, which Copilot CLI displays as the status bar
+1. Copilot CLI pipes a JSON payload to stdin on each refresh.
+2. `statusline.ps1` parses the payload and extracts model, token, duration, path, and lines-changed data.
+3. The script fetches quota data from `https://api.github.com/copilot_internal/user`.
+4. Quota usage is compared against calendar progress for the current month.
+5. Two ANSI-colored lines are written to stdout for Copilot CLI to render.
 
 ### GitHub Token Resolution
 
-The script resolves a GitHub token for the quota API in this order:
+The quota API token is resolved in this order:
 
-1. `GITHUB_TOKEN` environment variable
-2. `GH_TOKEN` environment variable
-3. Token from `~/.copilot/config.json` → `copilot_tokens`
-4. Git credential store (`git credential fill`)
-
-No additional authentication setup is needed if you're already logged into Copilot CLI.
+1. `GITHUB_TOKEN`
+2. `GH_TOKEN`
+3. `~/.copilot/config.json` → `copilot_tokens`
+4. `git credential fill`
 
 ### Debug Logging
 
-The script logs all raw stdin JSON payloads to `statusline.stdin.log` (in the same directory as the script) for debugging. You can safely delete this file at any time.
+`statusline.ps1` has a top-level `$DebugLog` switch. It is currently **off by default**:
+
+```powershell
+$DebugLog = $false
+```
+
+When enabled, raw stdin payloads are appended to `statusline.stdin.log` next to the script.
 
 ## Payload Parameters
 
-The script documents all known stdin payload fields in the header comments of `statusline.ps1`. Fields marked ✅ are actively used; fields marked ○ are available for future enhancements.
+The header comment in `statusline.ps1` lists all known stdin payload fields and marks which ones are currently used.
 
 ## License
 
 [MIT](LICENSE)
-
-(c) Andrzej

@@ -6,7 +6,7 @@ $DebugLog = $false
 #
 # Renders a two-line status bar from Copilot's JSON payload piped to stdin.
 #
-# LINE 1: model | context bar % size | duration | p.req. | in/out tokens | pace calendar | days ahead/behind
+# LINE 1: model | context bar % size | in/out tokens | duration | p.req. | quota pace
 # LINE 2: cwd path | +lines -lines
 #
 # ─── STDIN PAYLOAD PARAMETERS ────────────────────────────────────────────────
@@ -55,7 +55,7 @@ $DebugLog = $false
 #   current_usage.cache_read_input_tokens   int   Cache read tokens             ○  available
 #
 # External API (not from stdin):
-#   GitHub Copilot quota API → percent_remaining                               ✅ USED (Q% / M% + pace)
+#   GitHub Copilot quota API → percent_remaining                               ✅ USED (quota pace)
 #
 # ─── END PARAMETERS ──────────────────────────────────────────────────────────
 
@@ -76,13 +76,12 @@ $brightYellow = "$esc[93m"
 $red = "$esc[31m"
 $segmentSeparator = " $dim|$rst "
 
-# ─── Bar Chart Characters ────────────────────────────────────────────────────
+# ─── Bar Characters ──────────────────────────────────────────────────────────
 $filledChar = "█"
-$unfilledChar = "░"
+$hatchedChar = "░"
 
 # ─── Pace Display Labels ─────────────────────────────────────────────────────
 # "behind" = under quota pace (good), "ahead" = over quota pace (bad)
-$onPaceIcon = "🟡"
 $behindText = "behind"
 $onPaceText = "on pace"
 $aheadText = "ahead"
@@ -301,7 +300,7 @@ function Get-TotalDurationDisplay($payload) {
     return $null
 }
 
-# Builds context usage segment for line 1: "████░░░░░░ 23% 400K".
+# Builds context usage segment for line 1: colored/grey bars + "23% 400K".
 function Get-ContextUsageSegment($payload) {
     if ($null -eq $payload -or $null -eq $payload.context_window) { return $null }
 
@@ -351,6 +350,98 @@ function Get-LinesChangedStats($payload) {
     return "$addedStr $removedStr"
 }
 
+# Resolves a GitHub token from env vars, Copilot config, or git credential store.
+function Get-GitHubAccessToken {
+    if ($env:GITHUB_TOKEN) { return $env:GITHUB_TOKEN }
+    if ($env:GH_TOKEN) { return $env:GH_TOKEN }
+
+    $copilotCfgPath = Join-Path $env:USERPROFILE ".copilot\config.json"
+    if (Test-Path $copilotCfgPath) {
+        try {
+            $copilotCfg = Get-Content $copilotCfgPath -Raw | ConvertFrom-Json
+
+            if ($copilotCfg.last_logged_in_user -and $copilotCfg.copilot_tokens) {
+                $key = "$($copilotCfg.last_logged_in_user.host):$($copilotCfg.last_logged_in_user.login)"
+                if ($copilotCfg.copilot_tokens.PSObject.Properties.Name -contains $key) {
+                    $token = $copilotCfg.copilot_tokens.$key
+                    if ($token) { return $token }
+                }
+            }
+
+            if ($copilotCfg.copilot_tokens) {
+                foreach ($property in $copilotCfg.copilot_tokens.PSObject.Properties) {
+                    if ($property.Value) { return $property.Value }
+                }
+            }
+        } catch {}
+    }
+
+    try {
+        $git = Get-Command git -ErrorAction Stop
+        $credentialLines = "url=https://github.com" | & $git.Source credential fill 2>$null
+        $passwordLine = $credentialLines | Select-String "^password="
+        if ($passwordLine) { return $passwordLine.ToString().Split("=", 2)[1] }
+    } catch {}
+
+    return $null
+}
+
+# Queries the Copilot quota API and returns used premium quota percent.
+function Get-CopilotQuotaUsedPercentage {
+    $token = Get-GitHubAccessToken
+    if (-not $token) { return $null }
+
+    try {
+        $quota = Invoke-RestMethod -Uri "https://api.github.com/copilot_internal/user" `
+            -Headers @{ "Authorization" = "Bearer $token"; "Accept" = "application/json" } `
+            -TimeoutSec 5 -ErrorAction Stop
+        return [math]::Round(100 - $quota.quota_snapshots.premium_interactions.percent_remaining, 1)
+    } catch {}
+
+    return $null
+}
+
+# Builds the quota pace segment using a month-length calendar overlay.
+function Get-QuotaPaceSegment($usedPct) {
+    $now = Get-Date
+    $daysInMonth = [DateTime]::DaysInMonth($now.Year, $now.Month)
+    $elapsedDays = $now.Day
+
+    if ($null -eq $usedPct) {
+        return "$dim" + "Quota: $elapsedDays/$daysInMonth" + "$rst"
+    }
+
+    $monthPct = [math]::Round($elapsedDays / $daysInMonth * 100, 1)
+    $diff = [double]$usedPct - $monthPct
+    $daysDelta = [math]::Round($daysInMonth * ([math]::Abs($diff) / 100.0), 1)
+    $barCount = [int][math]::Ceiling($daysDelta)
+
+    if ($diff -lt 0 -and $daysDelta -ge 1) {
+        # Behind (good): green bars include today and preceding days.
+        $actualBars = [math]::Min($barCount, $elapsedDays)
+        $solidLeft = $elapsedDays - $actualBars
+        $hatchedRight = $daysInMonth - $elapsedDays
+        $paceCalendar = "$dim$($filledChar * $solidLeft)$rst$behindColor$($filledChar * $actualBars)$rst$dim$($hatchedChar * $hatchedRight)$rst"
+        return "Quota: $paceCalendar $behindColor$('{0:0.0}' -f $daysDelta) days $behindText$rst"
+    }
+
+    if ($diff -gt 0 -and $daysDelta -ge 1) {
+        # Ahead (bad): red bars include today and following days.
+        $maxBars = $daysInMonth - $elapsedDays + 1
+        $actualBars = [math]::Min($barCount, $maxBars)
+        $solidLeft = $elapsedDays - 1
+        $hatchedRight = $daysInMonth - $elapsedDays - $actualBars + 1
+        $paceCalendar = "$dim$($filledChar * $solidLeft)$rst$aheadColor$($filledChar * $actualBars)$rst$dim$($hatchedChar * $hatchedRight)$rst"
+        return "Quota: $paceCalendar $aheadColor$('{0:0.0}' -f $daysDelta) days $aheadText$rst"
+    }
+
+    # On pace (<1 day): today's bar is yellow, prior days remain solid grey.
+    $solidLeft = $elapsedDays - 1
+    $hatchedRight = $daysInMonth - $elapsedDays
+    $paceCalendar = "$dim$($filledChar * $solidLeft)$rst$onPaceColor$filledChar$rst$dim$($hatchedChar * $hatchedRight)$rst"
+    return "Quota: $paceCalendar $onPaceColor$onPaceText$rst"
+}
+
 # ═════════════════════════════════════════════════════════════════════════════
 # MAIN EXECUTION
 # ═════════════════════════════════════════════════════════════════════════════
@@ -369,123 +460,20 @@ if ($modelDisplayName) { $line1Segments.Add("$cyan$modelDisplayName$rst") }
 $contextUsageSegment = Get-ContextUsageSegment $contextPayload
 if ($contextUsageSegment) { $line1Segments.Add($contextUsageSegment) }
 
+$contextSegment = Get-ContextSummary $contextPayload
+if ($contextSegment) { $line1Segments.Add($contextSegment) }
+
 $durationDisplay = Get-TotalDurationDisplay $contextPayload
 if ($durationDisplay) { $line1Segments.Add($durationDisplay) }
 
 $totalPremiumRequests = Get-TotalPremiumRequests $contextPayload
 if ($null -ne $totalPremiumRequests) { $line1Segments.Add("$totalPremiumRequests p.req.") }
 
-# ─── Quota pacing (fetched from GitHub API) ──────────────────────────────────
-$usedPct = $null
-try {
-    # Resolve a GitHub token from env vars, Copilot config, or git credential store.
-    $token = $null
-    if ($env:GITHUB_TOKEN) {
-        $token = $env:GITHUB_TOKEN
-    } elseif ($env:GH_TOKEN) {
-        $token = $env:GH_TOKEN
-    } else {
-        $copilotCfgPath = Join-Path $env:USERPROFILE ".copilot\config.json"
-        if (Test-Path $copilotCfgPath) {
-            try {
-                $copilotCfg = Get-Content $copilotCfgPath -Raw | ConvertFrom-Json
-                if ($copilotCfg.last_logged_in_user -and $copilotCfg.copilot_tokens) {
-                    $key = "$($copilotCfg.last_logged_in_user.host):$($copilotCfg.last_logged_in_user.login)"
-                    if ($copilotCfg.copilot_tokens.PSObject.Properties.Name -contains $key) {
-                        $token = $copilotCfg.copilot_tokens.$key
-                    }
-                }
-                if (-not $token -and $copilotCfg.copilot_tokens) {
-                    foreach ($property in $copilotCfg.copilot_tokens.PSObject.Properties) {
-                        if ($property.Value) { $token = $property.Value; break }
-                    }
-                }
-            } catch {}
-        }
-    }
-    if (-not $token) {
-        try {
-            $git = Get-Command git -ErrorAction Stop
-            $token = ("url=https://github.com" | & $git.Source credential fill 2>$null |
-                Select-String "^password=").ToString().Split("=", 2)[1]
-        } catch {}
-    }
+# ─── Quota pacing ────────────────────────────────────────────────────────────
+$usedPct = Get-CopilotQuotaUsedPercentage
+$paceSegment = Get-QuotaPaceSegment $usedPct
 
-    # Query Copilot quota API for premium usage percentage.
-    if ($token) {
-        $quota = Invoke-RestMethod -Uri "https://api.github.com/copilot_internal/user" `
-            -Headers @{ "Authorization" = "Bearer $token"; "Accept" = "application/json" } `
-            -TimeoutSec 5 -ErrorAction Stop
-        $usedPct = [math]::Round(100 - $quota.quota_snapshots.premium_interactions.percent_remaining, 1)
-    }
-} catch {}
-
-# ─── Calendar pacing calculation ─────────────────────────────────────────────
-$now = Get-Date
-$daysInMonth = [DateTime]::DaysInMonth($now.Year, $now.Month)
-$elapsedDays = $now.Day
-$monthPct = [math]::Round($elapsedDays / $daysInMonth * 100, 1)
-
-# Calendar pace visualization: elapsed days as solid grey █, remaining as hatched ░,
-# with colored filled bars overlaid showing days ahead/behind quota pace.
-# Today is always included in the colored section.
-# Behind (green): colored bars include today and N-1 days before.
-# Ahead (red): colored bars include today and N-1 days after.
-# On pace (<1 day): today's bar is yellow.
-if ($null -ne $usedPct) {
-    $diff = $usedPct - $monthPct
-    $daysDelta = [math]::Round($daysInMonth * ([math]::Abs($diff) / 100.0), 1)
-    $barCount = [int][math]::Ceiling($daysDelta)
-    $todayIndex = $elapsedDays - 1  # 0-based position of today
-
-    if ($diff -lt 0 -and $daysDelta -ge 1) {
-        # Behind (good): green bars include today and days before
-        $actualBars = [math]::Min($barCount, $elapsedDays)  # include today
-        $solidLeft = $elapsedDays - $actualBars
-        $hatchedRight = $daysInMonth - $elapsedDays
-        $paceCalendar = "$dim$("█" * $solidLeft)$rst$behindColor$("█" * $actualBars)$rst$dim$("░" * $hatchedRight)$rst"
-        $paceSegment = "Quota: $paceCalendar $behindColor$('{0:0.0}' -f $daysDelta) days $behindText$rst"
-    } elseif ($diff -gt 0 -and $daysDelta -ge 1) {
-        # Ahead (bad): red bars include today and days after
-        $maxBars = $daysInMonth - $elapsedDays + 1  # include today
-        $actualBars = [math]::Min($barCount, $maxBars)
-        $solidLeft = $elapsedDays - 1
-        $hatchedRight = $daysInMonth - $elapsedDays - $actualBars + 1
-        $paceCalendar = "$dim$("█" * $solidLeft)$rst$aheadColor$("█" * $actualBars)$rst$dim$("░" * $hatchedRight)$rst"
-        $paceSegment = "Quota: $paceCalendar $aheadColor$('{0:0.0}' -f $daysDelta) days $aheadText$rst"
-    } else {
-        # On pace (within 1 day): mark today with yellow, show "on pace" text
-        $solidLeft = $elapsedDays - 1
-        $hatchedRight = $daysInMonth - $elapsedDays
-        $paceCalendar = "$dim$("█" * $solidLeft)$rst$onPaceColor█$rst$dim$("░" * $hatchedRight)$rst"
-        $paceSegment = "Quota: $paceCalendar $onPaceColor$onPaceText$rst"
-    }
-} else {
-    $paceSegment = "$dim($elapsedDays/$daysInMonth)$rst"
-}
-
-# ─── Previous pace visualization (commented out) ────────────────────────────
-# Pace bars: one colored block per day ahead/behind, with text label.
-# if ($null -ne $usedPct) {
-#     $diff = $usedPct - $monthPct
-#     $daysDelta = [math]::Round($daysInMonth * ([math]::Abs($diff) / 100.0), 1)
-#     $barCount = [int][math]::Ceiling($daysDelta)
-#     if ($diff -lt 0 -and $daysDelta -ge 1) {
-#         $bars = ("█" * $barCount) -replace '(?<=.)(?=.)', " "
-#         $paceSegment = "$behindColor$bars $('{0:0.0}' -f $daysDelta) days $behindText$rst"
-#     } elseif ($diff -gt 0 -and $daysDelta -ge 1) {
-#         $bars = ("█" * $barCount) -replace '(?<=.)(?=.)', " "
-#         $paceSegment = "$aheadColor$bars $('{0:0.0}' -f $daysDelta) days $aheadText$rst"
-#     } else {
-#         $paceSegment = "$onPaceColor$onPaceIcon $onPaceText$rst"
-#     }
-# } else {
-#     $paceSegment = "$dim($elapsedDays/$daysInMonth)$rst"
-# }
-
-# Append token summary and pace to line 1.
-$contextSegment = Get-ContextSummary $contextPayload
-$line1Segments.Add($contextSegment)
+# Append pace to line 1.
 $line1Segments.Add($paceSegment)
 $line1 = Join-StatusSegments $line1Segments
 
