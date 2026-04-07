@@ -4,10 +4,11 @@ $DebugLog = $false
 
 # Copilot CLI Status Line Script (Windows PowerShell)
 #
-# Renders a two-line status bar from Copilot's JSON payload piped to stdin.
+# Renders a three-line status bar from Copilot's JSON payload piped to stdin.
 #
-# LINE 1: model | context bar % size | duration | p.req. | in/out tokens | Q/M% | pace bars
+# LINE 1: model | context bar % size | duration | p.req. | in/out tokens
 # LINE 2: cwd path | +lines -lines
+# LINE 3: pace calendar bars | days ahead/behind
 #
 # ─── STDIN PAYLOAD PARAMETERS ────────────────────────────────────────────────
 #
@@ -483,10 +484,9 @@ if ($null -ne $usedPct) {
 #     $paceSegment = "$dim($elapsedDays/$daysInMonth)$rst"
 # }
 
-# Append token summary and pace to line 1.
+# Append token summary to line 1.
 $contextSegment = Get-ContextSummary $contextPayload
 $line1Segments.Add($contextSegment)
-$line1Segments.Add($paceSegment)
 $line1 = Join-StatusSegments $line1Segments
 
 # ─── Line 2: Path and lines changed ─────────────────────────────────────────
@@ -495,6 +495,10 @@ $line2Parts = @($workspaceDisplayPath)
 $linesChanged = Get-LinesChangedStats $contextPayload
 if ($linesChanged) { $line2Parts += $linesChanged }
 
+# ─── Line 3: Pace calendar ───────────────────────────────────────────────────
+$line3 = $paceSegment
+
 # ─── Output ──────────────────────────────────────────────────────────────────
 Write-Output $line1
 Write-Output ($line2Parts -join " | ")
+Write-Output $line3
