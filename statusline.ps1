@@ -1,6 +1,6 @@
 # ─── Configuration ────────────────────────────────────────────────────────────
 # Set to $true to log raw stdin JSON to statusline.stdin.log (for debugging).
-$DebugLog = $true
+$DebugLog = $false
 
 # Copilot CLI Status Line Script (Windows PowerShell)
 #
