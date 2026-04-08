@@ -1,6 +1,6 @@
 # Copilot CLI Status Line
 
-A Windows PowerShell status line for [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) that renders live session metrics, workspace stats, and Copilot quota pacing directly in the terminal.
+A Windows PowerShell status line for [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) that renders live session metrics, workspace stats, and Copilot quota pacing directly in the terminal. The segment order is user-configurable from the top of `statusline.ps1`.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 ![PowerShell 7+](https://img.shields.io/badge/PowerShell-7%2B-5391FE)
@@ -8,7 +8,7 @@ A Windows PowerShell status line for [GitHub Copilot CLI](https://docs.github.co
 
 ## What It Shows
 
-The current script renders **two lines**:
+The current script renders **two configurable lines**. The default layout is:
 
 ```text
 gpt-5.4 (high) | ██████████ 22% 400K | in 1.7M out 27K | 54m | 5 p.req. | Quota: ████████░░░░░░░░░░░░░░░░░░░░░░ 3.2 days behind (160 p.req.)
@@ -33,6 +33,43 @@ D:\GITHUB\my-project | +695 -146
 |---------|-------------|
 | **Path** | `cwd`, falling back to `workspace.current_dir` |
 | **Lines changed** | `+added` in green and `-removed` in red from the Copilot payload |
+
+## Customizing the Layout
+
+At the top of `statusline.ps1`, edit these arrays to choose which segments are shown and in what order:
+
+```powershell
+$Line1Layout = @(
+    'model'
+    'context_bar'
+    'tokens'
+    'duration'
+    'premium_requests'
+    'quota'
+)
+
+$Line2Layout = @(
+    'path'
+    'lines_changed'
+)
+```
+
+Remove a segment name to hide it, or reorder the entries to change the display order.
+
+Available segment names:
+
+| Name | Line | Description |
+|------|------|-------------|
+| `model` | 1 | Active model name |
+| `context_bar` | 1 | Context-window usage bar, percent, and size |
+| `tokens` | 1 | Cumulative input / output token totals |
+| `duration` | 1 | Total session wall-clock time |
+| `premium_requests` | 1 | Premium request count (`p.req.`) |
+| `quota` | 1 | Monthly quota pacing segment |
+| `path` | 2 | Current workspace / working directory |
+| `lines_changed` | 2 | `+added` / `-removed` lines from the payload |
+
+If `quota` is removed from both layout arrays, the script skips the GitHub quota API call entirely.
 
 ## Quota Calendar
 
@@ -132,7 +169,7 @@ echo $null | pwsh -NoProfile -File .\statusline.ps1
 2. `statusline.ps1` parses the payload and extracts model, token, duration, path, and lines-changed data.
 3. The script fetches quota data from `https://api.github.com/copilot_internal/user` and reads both `percent_remaining` and `entitlement`.
 4. Quota usage is compared against calendar progress for the current month using time-of-day-aware rounding and spillover-based bar rendering.
-5. Two ANSI-colored lines are written to stdout for Copilot CLI to render.
+5. The configured line layouts are resolved into segment strings and written to stdout.
 
 ### GitHub Token Resolution
 
