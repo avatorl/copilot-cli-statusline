@@ -43,7 +43,7 @@ $Line3Layout = @(
 #
 # Renders up to three configurable status lines from Copilot's JSON payload piped to stdin.
 #
-# LINE 1: model | context bar % size | in/out tokens | duration | p.req. | quota pace
+# LINE 1: model | context bar % size | in/out/cached tokens | duration | p.req. | quota pace
 #         (configurable — see $Line1Layout above)
 # LINE 2: cwd path | +lines -lines
 #         (configurable — see $Line2Layout above)
@@ -314,7 +314,7 @@ function Get-ContextUsageSegment($payload) {
     return [string]::Join(" ", $segments)
 }
 
-# Builds cumulative token segment for line 1: "in 2.3M out 29K".
+# Builds cumulative token segment for line 1: "in 2.3M out 29K cached 5K".
 function Get-ContextSummary($payload) {
     if ($null -eq $payload -or $null -eq $payload.context_window) { return $null }
 
@@ -322,11 +322,19 @@ function Get-ContextSummary($payload) {
     $outputTokens = ConvertTo-NullableInt $payload.context_window.total_output_tokens
     if ($null -eq $inputTokens -and $null -eq $outputTokens) { return $null }
 
+    $cacheRead = ConvertTo-NullableInt $payload.context_window.total_cache_read_tokens
+    $cacheWrite = ConvertTo-NullableInt $payload.context_window.total_cache_write_tokens
+    $cachedTokens = if ($null -ne $cacheRead -or $null -ne $cacheWrite) {
+        ($cacheRead ?? 0) + ($cacheWrite ?? 0)
+    } else { $null }
+
     $segments = New-Object System.Collections.Generic.List[string]
     $in = Format-ColoredToken "in" $inputTokens
     if ($in) { $segments.Add($in) }
     $out = Format-ColoredToken "out" $outputTokens
     if ($out) { $segments.Add($out) }
+    $cached = Format-ColoredToken "cached" $cachedTokens
+    if ($cached) { $segments.Add($cached) }
     return [string]::Join(" ", $segments)
 }
 

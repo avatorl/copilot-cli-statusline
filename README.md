@@ -31,7 +31,7 @@ D:\GITHUB\my-project | +695 -146
 |---------|-------------------|-----------------|-------|
 | **Model** | Which model is answering right now | `model.display_name`, fallback `model.id` | Shown in cyan |
 | **Context usage** | How full the current context window is | `context_window.used_percentage`, `context_window.context_window_size` | Renders a 10-cell bar, rounded percent, and compact size |
-| **Tokens** | How many input and output tokens the session has spent so far | `context_window.total_input_tokens`, `context_window.total_output_tokens` | Shows `in` and `out` totals |
+| **Tokens** | How many input, output, and cached tokens the session has spent so far | `context_window.total_input_tokens`, `context_window.total_output_tokens`, `context_window.total_cache_read_tokens`, `context_window.total_cache_write_tokens` | Shows `in`, `out`, and `cached` totals; `cached` = read + write |
 | **Duration** | How long the session has been running | `cost.total_duration_ms` | Rounded to whole minutes; hidden under 30 seconds |
 | **Premium requests** | How many premium requests this session has used | `cost.total_premium_requests` | Rendered as `N p.req.` |
 | **Quota** | Whether monthly premium usage is behind pace, on pace, ahead, or exceeded | GitHub Copilot quota API: `quota_snapshots.premium_interactions.percent_remaining`, `quota_snapshots.premium_interactions.entitlement` | Uses a month-shaped calendar bar |
@@ -80,7 +80,7 @@ Available segment names:
 |--------------|--------------|---------------|-----------------|
 | `model` | 1 | Active model name | `model.display_name`, fallback `model.id` |
 | `context_bar` | 1 | Context-window usage bar, rounded percent, and size | `context_window.used_percentage`, `context_window.context_window_size` |
-| `tokens` | 1 | Cumulative input and output token totals | `context_window.total_input_tokens`, `context_window.total_output_tokens` |
+| `tokens` | 1 | Cumulative input, output, and cached token totals | `context_window.total_input_tokens`, `context_window.total_output_tokens`, `context_window.total_cache_read_tokens` + `total_cache_write_tokens` |
 | `duration` | 1 | Session wall-clock time | `cost.total_duration_ms` |
 | `premium_requests` | 1 | Premium request count | `cost.total_premium_requests` |
 | `quota` | 1 | Monthly premium quota pacing indicator | Copilot quota API `percent_remaining`, `entitlement` |
@@ -227,8 +227,8 @@ Start a new Copilot CLI session and the status line should appear automatically.
 There is no automated test suite. Test by piping sample payloads into `statusline.ps1`.
 
 ```powershell
-# Full payload
-'{"cwd":"D:\\TEST","model":{"id":"gpt-5.4","display_name":"gpt-5.4 (high)"},"workspace":{"current_dir":"D:\\TEST"},"cost":{"total_duration_ms":3241747,"total_lines_added":100,"total_lines_removed":50,"total_premium_requests":5},"context_window":{"total_input_tokens":1744196,"total_output_tokens":26870,"context_window_size":400000,"used_percentage":22}}' | pwsh -NoProfile -File .\statusline.ps1
+# Full payload (with cache tokens)
+'{"cwd":"D:\\TEST","model":{"id":"gpt-5.4","display_name":"gpt-5.4 (high)"},"workspace":{"current_dir":"D:\\TEST"},"cost":{"total_duration_ms":3241747,"total_lines_added":100,"total_lines_removed":50,"total_premium_requests":5},"context_window":{"total_input_tokens":1744196,"total_output_tokens":26870,"total_cache_read_tokens":85000,"total_cache_write_tokens":12000,"context_window_size":400000,"used_percentage":22}}' | pwsh -NoProfile -File .\statusline.ps1
 
 # Minimal payload
 '{"context_window":{"context_window_size":400000,"used_percentage":0}}' | pwsh -NoProfile -File .\statusline.ps1
