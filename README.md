@@ -320,8 +320,8 @@ The Copilot CLI pipes a JSON object to stdin on each refresh. Two payload shapes
 |-------|------|----------|---------|
 | `context_window.total_input_tokens` | `int` | Yes | Cumulative input tokens |
 | `context_window.total_output_tokens` | `int` | Yes | Cumulative output tokens |
-| `context_window.total_cache_read_tokens` | `int` | No | Tokens served from cache |
-| `context_window.total_cache_write_tokens` | `int` | No | Tokens written to cache |
+| `context_window.total_cache_read_tokens` | `int` | Yes | Tokens served from cache |
+| `context_window.total_cache_write_tokens` | `int` | Yes | Tokens written to cache |
 | `context_window.total_tokens` | `int` | No | Sum of input and output tokens |
 | `context_window.context_window_size` | `int` | Yes | Max context window size |
 | `context_window.used_percentage` | `int` | Yes | Percent of context window used |
