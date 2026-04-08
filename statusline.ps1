@@ -495,7 +495,7 @@ function Get-QuotaPaceSegment($quotaData) {
         if ($barCount -gt 0) {
             $futureRedBars = [math]::Min($barCount, $futureCount)
             $cal = "$dim$($filledChar * $todayIndex)$rst$red$darkShadeChar$($hatchedChar * $futureRedBars)$rst$dim$($hatchedChar * ($futureCount - $futureRedBars))$rst"
-            return "Quota: $cal $red$('{0:0.0}' -f $daysDelta) days $aheadText$rst"
+            return "Quota: $cal $red$('{0:0.0}' -f $daysDelta)d $aheadText$rst"
         }
     }
 
@@ -516,7 +516,7 @@ function Get-QuotaPaceSegment($quotaData) {
             }
 
             $cal = "$dim$($filledChar * ($todayIndex - $pastGreenBars))$rst$green$($filledChar * $pastGreenBars)$darkShadeChar$rst$dim$($hatchedChar * $futureCount)$rst"
-            return "Quota: $cal $green$('{0:0.0}' -f $daysDelta) days $behindText$pReqHint$rst"
+            return "Quota: $cal $green$('{0:0.0}' -f $daysDelta)d $behindText$pReqHint$rst"
         }
     }
 
