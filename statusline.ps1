@@ -18,6 +18,9 @@ $DebugLog = $false
 #   path               - Current workspace / working directory
 #   lines_changed      - Lines added / removed this session (+N -N)
 #
+# Line 3 segment names:
+#   (empty by default — add any segment names you want on a third line)
+#
 $Line1Layout = @(
     'model'
     'context_bar'
@@ -31,66 +34,23 @@ $Line2Layout = @(
     'path'
     'lines_changed'
 )
+
+$Line3Layout = @(
+)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Copilot CLI Status Line Script (Windows PowerShell)
 #
-# Renders a two-line status bar from Copilot's JSON payload piped to stdin.
+# Renders up to three configurable status lines from Copilot's JSON payload piped to stdin.
 #
 # LINE 1: model | context bar % size | in/out tokens | duration | p.req. | quota pace
 #         (configurable — see $Line1Layout above)
 # LINE 2: cwd path | +lines -lines
 #         (configurable — see $Line2Layout above)
+# LINE 3: disabled by default
+#         (configurable — see $Line3Layout above)
 #
-# ─── STDIN PAYLOAD PARAMETERS ────────────────────────────────────────────────
-#
-# The Copilot CLI pipes a JSON object to stdin on each status refresh.
-# Two payload shapes exist: a minimal one (context-only) and a full one.
-#
-# Top-level fields:
-#   cwd                         string   Current working directory              ✅ USED (line 2 path)
-#   session_id                  string   Unique session identifier              ○  available
-#   session_name                string   Human-readable session name            ○  available
-#   transcript_path             string   Path to session transcript folder      ○  available
-#   version                     string   Copilot CLI version (e.g. "1.0.20")   ○  available
-#
-# model:
-#   model.id                    string   Model identifier (e.g. "gpt-5.4")     ✅ USED (fallback name)
-#   model.display_name          string   Friendly model name                    ✅ USED (line 1 model)
-#
-# workspace:
-#   workspace.current_dir       string   Workspace root directory               ✅ USED (fallback for cwd)
-#
-# cost:
-#   cost.total_api_duration_ms  int      Cumulative API call time in ms         ○  available
-#   cost.total_lines_added      int      Total lines added this session         ✅ USED (line 2 green +N)
-#   cost.total_lines_removed    int      Total lines removed this session       ✅ USED (line 2 red -N)
-#   cost.total_duration_ms      int      Total session wall-clock time in ms    ✅ USED (line 1 duration)
-#   cost.total_premium_requests int      Premium request count this session     ✅ USED (line 1 p.req.)
-#
-# context_window:
-#   context_window.total_input_tokens       int   Cumulative input tokens       ✅ USED (line 1 "in")
-#   context_window.total_output_tokens      int   Cumulative output tokens      ✅ USED (line 1 "out")
-#   context_window.total_cache_read_tokens  int   Tokens served from cache      ○  available
-#   context_window.total_cache_write_tokens int   Tokens written to cache       ○  available
-#   context_window.total_tokens             int   Sum of input + output tokens  ○  available
-#   context_window.context_window_size      int   Max context window size       ✅ USED (line 1 size)
-#   context_window.used_percentage          int   % of context window used      ✅ USED (line 1 bar + %)
-#   context_window.remaining_percentage     int   % of context window free      ○  available
-#   context_window.remaining_tokens         int   Tokens still available        ○  available
-#   context_window.last_call_input_tokens   int   Input tokens in last call     ○  available
-#   context_window.last_call_output_tokens  int   Output tokens in last call    ○  available
-#
-# context_window.current_usage:
-#   current_usage.input_tokens              int   Raw input tokens used         ○  available
-#   current_usage.output_tokens             int   Raw output tokens used        ○  available
-#   current_usage.cache_creation_input_tokens int  Cache creation tokens        ○  available
-#   current_usage.cache_read_input_tokens   int   Cache read tokens             ○  available
-#
-# External API (not from stdin):
-#   GitHub Copilot quota API → percent_remaining, entitlement                  ✅ USED (quota pace)
-#
-# ─── END PARAMETERS ──────────────────────────────────────────────────────────
+# The full stdin payload field reference lives in README.md.
 
 # ─── UTF-8 Encoding ──────────────────────────────────────────────────────────
 # Force UTF-8 so the status line runner preserves block characters and emoji.
@@ -385,10 +345,11 @@ function Get-LinesChangedStats($payload) {
     return "$addedStr $removedStr"
 }
 
-# Resolves a GitHub token from env vars, Copilot config, or git credential store.
+# Resolves a GitHub token from supported env vars, plaintext Copilot config, or gh CLI.
 function Get-GitHubAccessToken {
-    if ($env:GITHUB_TOKEN) { return $env:GITHUB_TOKEN }
+    if ($env:COPILOT_GITHUB_TOKEN) { return $env:COPILOT_GITHUB_TOKEN }
     if ($env:GH_TOKEN) { return $env:GH_TOKEN }
+    if ($env:GITHUB_TOKEN) { return $env:GITHUB_TOKEN }
 
     $copilotCfgPath = Join-Path $env:USERPROFILE ".copilot\config.json"
     if (Test-Path $copilotCfgPath) {
@@ -412,10 +373,9 @@ function Get-GitHubAccessToken {
     }
 
     try {
-        $git = Get-Command git -ErrorAction Stop
-        $credentialLines = "url=https://github.com" | & $git.Source credential fill 2>$null
-        $passwordLine = $credentialLines | Select-String "^password="
-        if ($passwordLine) { return $passwordLine.ToString().Split("=", 2)[1] }
+        $gh = Get-Command gh -ErrorAction Stop
+        $token = (& $gh.Source auth token 2>$null | Out-String).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($token)) { return $token }
     } catch {}
 
     return $null
@@ -494,8 +454,16 @@ function Get-QuotaPaceSegment($quotaData) {
         $barCount  = [int][math]::Round($spillover, [System.MidpointRounding]::AwayFromZero)
         if ($barCount -gt 0) {
             $futureRedBars = [math]::Min($barCount, $futureCount)
+            
+            # p.req. hint: requests that exceeded expected pace.
+            $pReqHint = ""
+            if ($null -ne $entitlement) {
+                $pReq = [int][math]::Round($daysDelta / $daysInMonth * $entitlement, [System.MidpointRounding]::AwayFromZero)
+                if ($pReq -gt 0) { $pReqHint = " ($pReq p.req.)" }
+            }
+            
             $cal = "$dim$($filledChar * $todayIndex)$rst$red$darkShadeChar$($hatchedChar * $futureRedBars)$rst$dim$($hatchedChar * ($futureCount - $futureRedBars))$rst"
-            return "Quota: $cal $red$('{0:0.0}' -f $daysDelta)d $aheadText$rst"
+            return "Quota: $cal $red$('{0:0.0}' -f $daysDelta)d $aheadText$pReqHint$rst"
         }
     }
 
@@ -535,7 +503,7 @@ Write-StdinLog $rawStdin
 $contextPayload = ConvertFrom-JsonObjectOrNull $rawStdin
 
 # ─── Fetch quota data once (skipped if 'quota' is not in any layout) ─────────
-$allLayoutSegments = $Line1Layout + $Line2Layout
+$allLayoutSegments = $Line1Layout + $Line2Layout + $Line3Layout
 $quotaData = if ($allLayoutSegments -contains 'quota') { Get-CopilotQuotaData } else { $null }
 
 # ─── Segment resolver ────────────────────────────────────────────────────────
@@ -577,6 +545,12 @@ function Resolve-Segment([string]$name) {
 # ─── Build and output each line ──────────────────────────────────────────────
 $line1Segments = $Line1Layout | ForEach-Object { Resolve-Segment $_ }
 $line2Segments = $Line2Layout | ForEach-Object { Resolve-Segment $_ }
+$line3Segments = $Line3Layout | ForEach-Object { Resolve-Segment $_ }
 
 Write-Output (Join-StatusSegments $line1Segments)
 Write-Output (Join-StatusSegments $line2Segments)
+
+$line3 = Join-StatusSegments $line3Segments
+if (-not [string]::IsNullOrWhiteSpace($line3)) {
+    Write-Output $line3
+}
