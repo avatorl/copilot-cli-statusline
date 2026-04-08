@@ -39,12 +39,12 @@ The quota segment renders the current month as a compact calendar:
 
 - **Solid grey `█`** = elapsed past days outside the pace deviation
 - **Green solid `█`** = behind-pace spillover into previous days
-- **White solid `█`** = today, always shown as a single white bar
+- **Dark shade `▓`** = today
 - **Red hatched `░`** = ahead-of-pace spillover into future days
-- **Grey hatched `░`** = future days outside the pace deviation
+- **Light shade `░`** = future days outside the pace deviation
 - **Red circle + `quota exceeded`** = usage is at or above 100%
 
-Today stays white. The green or red overlay appears only when the time-of-day-aware deviation rounds to at least **0.5 day** of spillover beyond today. For example, **3 days behind** shows three green bars before today, and **3 days ahead** shows three red hatched bars after today.
+Today is **white only when on pace**. When the user is behind or ahead, the today bar switches to the matching pace color and stays rendered as a dark shade `▓`. The green or red overlay appears only when the time-of-day-aware deviation rounds to at least **0.5 day** of spillover beyond today. For example, **3 days behind** shows three green bars before today plus a green today bar, and **3 days ahead** shows three red hatched bars after a red today bar.
 
 When the user is behind pace and the Copilot quota API returns `entitlement`, the label also includes an unrealized premium request hint such as `(160 p.req.)`.
 
@@ -55,7 +55,7 @@ If the quota API is unavailable, the script falls back to a dim `Quota: day/mont
 - **Context bar**: green under 75%, yellow at 75%+, red at 90%+
 - **Unused context bar cells**: solid grey
 - **Token values only** are colored: bright yellow at 10K+, yellow at 100K+, red at 1M+
-- **Quota pace**: green = behind, white = on pace/today, red = ahead
+- **Quota pace**: green = behind, white = on pace only, red = ahead
 
 ## Requirements
 
