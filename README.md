@@ -14,6 +14,8 @@ The current script renders **two lines**:
 gpt-5.4 (high) | ██████████ 22% 400K | in 1.7M out 27K | 54m | 5 p.req. | Quota: ████████░░░░░░░░░░░░░░░░░░░░░░ 3.2 days behind (160 p.req.)
 D:\GITHUB\my-project | +695 -146
 ```
+<img width="1905" height="181" alt="image" src="https://github.com/user-attachments/assets/b1e725ac-fcfb-47a6-a04e-0e290edbe234" />
+
 
 ### Line 1 - Session Status
 
