@@ -55,7 +55,7 @@ $DebugLog = $false
 #   current_usage.cache_read_input_tokens   int   Cache read tokens             ○  available
 #
 # External API (not from stdin):
-#   GitHub Copilot quota API → percent_remaining                               ✅ USED (quota pace)
+#   GitHub Copilot quota API → percent_remaining, entitlement                  ✅ USED (quota pace)
 #
 # ─── END PARAMETERS ──────────────────────────────────────────────────────────
 
@@ -74,6 +74,7 @@ $green = "$esc[32m"
 $yellow = "$esc[33m"
 $brightYellow = "$esc[93m"
 $red = "$esc[31m"
+$white = "$esc[97m"
 $segmentSeparator = " $dim|$rst "
 
 # ─── Bar Characters ──────────────────────────────────────────────────────────
@@ -82,12 +83,12 @@ $hatchedChar = "░"
 
 # ─── Pace Display Labels ─────────────────────────────────────────────────────
 # "behind" = under quota pace (good), "ahead" = over quota pace (bad)
-$behindText = "behind"
-$onPaceText = "on pace"
-$aheadText = "ahead"
+$behindText  = "behind"
+$onPaceText  = "on pace"
+$aheadText   = "ahead"
 $behindColor = $green
-$onPaceColor = $yellow
-$aheadColor = $red
+$onPaceColor = $white   # neutral/informational; white is visually calm
+$aheadColor  = $red
 
 # ─── Debug Logging ───────────────────────────────────────────────────────────
 $scriptDirectory = Split-Path -Parent $PSCommandPath
@@ -233,18 +234,18 @@ function Format-ColoredToken([string]$prefix, $value) {
     return "$prefix $formattedValue"
 }
 
-# Renders a fixed-width 10-char bar chart from a percentage (0-100).
-# Filled portion uses the provided color, unfilled portion is grey.
+# Renders a fixed-width 10-char bar chart from a percentage (0–100).
+# Works in double precision to avoid int-coercion rounding before the fill calculation.
+# Filled portion uses the provided color; unfilled portion is dim grey.
 function Get-Bar($value, [string]$ansiColor, [int]$width = 10) {
-    $number = ConvertTo-NullableInt $value
-    if ($null -eq $number) { $number = 0 }
-    $number = [math]::Max(0, [math]::Min(100, $number))
-
-    $filled = [math]::Min($width, [int](($number * $width + 50) / 100))
-    $empty = $width - $filled
+    # Clamp to [0, 100] without int coercion so fractional percentages round correctly.
+    $pct    = if ($null -ne $value) { [math]::Max(0.0, [math]::Min(100.0, [double]$value)) } else { 0.0 }
+    # AwayFromZero: 2.5 → 3, 2.4 → 2 (round-half-up for bar charts)
+    $filled = [math]::Min($width, [int][math]::Round($pct / 100.0 * $width, [System.MidpointRounding]::AwayFromZero))
+    $empty  = $width - $filled
 
     $filledPart = if ($filled -gt 0) { $script:filledChar * $filled } else { "" }
-    $emptyPart = if ($empty -gt 0) { $script:filledChar * $empty } else { "" }
+    $emptyPart  = if ($empty  -gt 0) { $script:filledChar * $empty  } else { "" }
     return "$ansiColor$filledPart$rst$script:dim$emptyPart$rst"
 }
 
@@ -386,60 +387,108 @@ function Get-GitHubAccessToken {
     return $null
 }
 
-# Queries the Copilot quota API and returns used premium quota percent.
-function Get-CopilotQuotaUsedPercentage {
+# Queries the Copilot quota API; returns a PSCustomObject with UsedPct and Entitlement,
+# or $null when the token is unavailable or the API call fails.
+function Get-CopilotQuotaData {
     $token = Get-GitHubAccessToken
     if (-not $token) { return $null }
 
     try {
-        $quota = Invoke-RestMethod -Uri "https://api.github.com/copilot_internal/user" `
+        $response = Invoke-RestMethod -Uri "https://api.github.com/copilot_internal/user" `
             -Headers @{ "Authorization" = "Bearer $token"; "Accept" = "application/json" } `
             -TimeoutSec 5 -ErrorAction Stop
-        return [math]::Round(100 - $quota.quota_snapshots.premium_interactions.percent_remaining, 1)
+
+        $snap = $response.quota_snapshots.premium_interactions
+        # Guard: missing or non-numeric percent_remaining must not silently produce UsedPct=100.
+        if ($null -eq $snap -or $null -eq $snap.percent_remaining) { return $null }
+
+        $usedPct     = [math]::Round(100 - [double]$snap.percent_remaining, 1)
+        $entitlement = if ($null -ne $snap.entitlement -and [double]$snap.entitlement -gt 0) {
+            [int]$snap.entitlement
+        } else { $null }
+
+        return [PSCustomObject]@{ UsedPct = $usedPct; Entitlement = $entitlement }
     } catch {}
 
     return $null
 }
 
 # Builds the quota pace segment using a month-length calendar overlay.
-function Get-QuotaPaceSegment($usedPct) {
-    $now = Get-Date
+#
+# Bar layout (left→right, always exactly daysInMonth bars):
+#   [grey-solid × todayIndex] [green-solid × pastGreenBars]
+#   [white-solid × 1 (today)] [red-hatched × futureRedBars] [grey-hatched × remaining]
+#
+# Pace is computed in fractional days, time-of-day aware. Rounding uses AwayFromZero
+# so a deviation rounds to a visible bar only when it reaches 0.5 days of spillover.
+# "Spillover" is the deviation that extends beyond today into past/future bar slots.
+#
+# Parameters:
+#   $quotaData — [PSCustomObject]@{ UsedPct; Entitlement } or $null (API unavailable)
+function Get-QuotaPaceSegment($quotaData) {
+    $now         = Get-Date
     $daysInMonth = [DateTime]::DaysInMonth($now.Year, $now.Month)
-    $elapsedDays = $now.Day
+    $todayIndex  = $now.Day - 1                        # count of bar slots before today (0-based)
+    $todayFrac   = $now.TimeOfDay.TotalHours / 24.0    # 0.0 at midnight → ~1.0 at day end
+    $futureCount = $daysInMonth - $now.Day             # count of bar slots after today
 
+    $usedPct     = if ($quotaData) { $quotaData.UsedPct }     else { $null }
+    $entitlement = if ($quotaData) { $quotaData.Entitlement } else { $null }
+
+    # ── No data: show grey bar with white today and date ─────────────────────
     if ($null -eq $usedPct) {
-        return "$dim" + "Quota: $elapsedDays/$daysInMonth" + "$rst"
+        $cal = "$dim$($filledChar * $todayIndex)$rst$white$filledChar$rst$dim$($hatchedChar * $futureCount)$rst"
+        return "Quota: $cal $dim$($now.Day)/$daysInMonth$rst"
     }
 
-    $monthPct = [math]::Round($elapsedDays / $daysInMonth * 100, 1)
-    $diff = [double]$usedPct - $monthPct
-    $daysDelta = [math]::Round($daysInMonth * ([math]::Abs($diff) / 100.0), 1)
-    $barCount = [int][math]::Ceiling($daysDelta)
+    # Fractional elapsed days since month start (includes partial current day).
+    $elapsedFraction = $todayIndex + $todayFrac
+    $monthPct        = $elapsedFraction / $daysInMonth * 100.0
+    $diff            = [double]$usedPct - $monthPct          # positive = ahead, negative = behind
+    $daysDelta       = $daysInMonth * [math]::Abs($diff) / 100.0
 
-    if ($diff -lt 0 -and $daysDelta -ge 1) {
-        # Behind (good): green bars include today and preceding days.
-        $actualBars = [math]::Min($barCount, $elapsedDays)
-        $solidLeft = $elapsedDays - $actualBars
-        $hatchedRight = $daysInMonth - $elapsedDays
-        $paceCalendar = "$dim$($filledChar * $solidLeft)$rst$behindColor$($filledChar * $actualBars)$rst$dim$($hatchedChar * $hatchedRight)$rst"
-        return "Quota: $paceCalendar $behindColor$('{0:0.0}' -f $daysDelta) days $behindText$rst"
+    # ── Exceeded: 100%+ quota consumed ───────────────────────────────────────
+    if ($usedPct -ge 100) {
+        $cal = "$dim$($filledChar * $todayIndex)$rst$white$filledChar$rst$red$($hatchedChar * $futureCount)$rst"
+        return "Quota: $cal ${red}🔴 quota exceeded$rst"
     }
 
-    if ($diff -gt 0 -and $daysDelta -ge 1) {
-        # Ahead (bad): red bars include today and following days.
-        $maxBars = $daysInMonth - $elapsedDays + 1
-        $actualBars = [math]::Min($barCount, $maxBars)
-        $solidLeft = $elapsedDays - 1
-        $hatchedRight = $daysInMonth - $elapsedDays - $actualBars + 1
-        $paceCalendar = "$dim$($filledChar * $solidLeft)$rst$aheadColor$($filledChar * $actualBars)$rst$dim$($hatchedChar * $hatchedRight)$rst"
-        return "Quota: $paceCalendar $aheadColor$('{0:0.0}' -f $daysDelta) days $aheadText$rst"
+    # ── Ahead (over pace, bad): today absorbs the remaining fraction of the day;
+    #    any excess spills into future slots as red hatched bars.
+    if ($diff -gt 0) {
+        $spillover = $daysDelta - (1.0 - $todayFrac)
+        $barCount  = [int][math]::Round($spillover, [System.MidpointRounding]::AwayFromZero)
+        if ($barCount -gt 0) {
+            $futureRedBars = [math]::Min($barCount, $futureCount)
+            $cal = "$dim$($filledChar * $todayIndex)$rst$white$filledChar$rst$red$($hatchedChar * $futureRedBars)$rst$dim$($hatchedChar * ($futureCount - $futureRedBars))$rst"
+            return "Quota: $cal $red$('{0:0.0}' -f $daysDelta) days $aheadText$rst"
+        }
     }
 
-    # On pace (<1 day): today's bar is yellow, prior days remain solid grey.
-    $solidLeft = $elapsedDays - 1
-    $hatchedRight = $daysInMonth - $elapsedDays
-    $paceCalendar = "$dim$($filledChar * $solidLeft)$rst$onPaceColor$filledChar$rst$dim$($hatchedChar * $hatchedRight)$rst"
-    return "Quota: $paceCalendar $onPaceColor$onPaceText$rst"
+    # ── Behind (under pace, good): today absorbs the elapsed fraction;
+    #    any excess spills back into past slots as green solid bars.
+    if ($diff -lt 0) {
+        $spillover = $daysDelta - $todayFrac
+        $barCount  = [int][math]::Round($spillover, [System.MidpointRounding]::AwayFromZero)
+        if ($barCount -gt 0) {
+            # Cap to available past slots; prevents bars before day 1.
+            $pastGreenBars = [math]::Min($barCount, $todayIndex)
+
+            # p.req. hint: requests that could have been consumed but weren't.
+            $pReqHint = ""
+            if ($null -ne $entitlement) {
+                $pReq = [int][math]::Round($daysDelta / $daysInMonth * $entitlement, [System.MidpointRounding]::AwayFromZero)
+                if ($pReq -gt 0) { $pReqHint = " ($pReq p.req.)" }
+            }
+
+            $cal = "$dim$($filledChar * ($todayIndex - $pastGreenBars))$rst$green$($filledChar * $pastGreenBars)$rst$white$filledChar$rst$dim$($hatchedChar * $futureCount)$rst"
+            return "Quota: $cal $green$('{0:0.0}' -f $daysDelta) days $behindText$pReqHint$rst"
+        }
+    }
+
+    # ── On pace: deviation rounds to zero bars — within half a day of target.
+    $cal = "$dim$($filledChar * $todayIndex)$rst$white$filledChar$rst$dim$($hatchedChar * $futureCount)$rst"
+    return "Quota: $cal $white$onPaceText$rst"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -470,8 +519,8 @@ $totalPremiumRequests = Get-TotalPremiumRequests $contextPayload
 if ($null -ne $totalPremiumRequests) { $line1Segments.Add("$totalPremiumRequests p.req.") }
 
 # ─── Quota pacing ────────────────────────────────────────────────────────────
-$usedPct = Get-CopilotQuotaUsedPercentage
-$paceSegment = Get-QuotaPaceSegment $usedPct
+$quotaData   = Get-CopilotQuotaData
+$paceSegment = Get-QuotaPaceSegment $quotaData
 
 # Append pace to line 1.
 $line1Segments.Add($paceSegment)
