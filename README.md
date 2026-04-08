@@ -15,7 +15,7 @@ gpt-5.4 (high) | ██████████ 22% 400K | in 1.7M out 27K | 54m
 D:\GITHUB\my-project | +695 -146
 ```
 
-### Line 1 — Session Status
+### Line 1 - Session Status
 
 | Segment | Description |
 |---------|-------------|
@@ -26,7 +26,7 @@ D:\GITHUB\my-project | +695 -146
 | **Premium requests** | `cost.total_premium_requests` |
 | **Quota** | Month calendar overlay showing quota pace relative to the current day |
 
-### Line 2 — Workspace Status
+### Line 2 - Workspace Status
 
 | Segment | Description |
 |---------|-------------|
@@ -37,13 +37,14 @@ D:\GITHUB\my-project | +695 -146
 
 The quota segment renders the current month as a compact calendar:
 
-- **Solid grey `█`** = elapsed days
-- **Hatched grey `░`** = remaining days
-- **Green overlay** = behind quota pace (good)
-- **Red overlay** = ahead of quota pace
-- **Yellow today bar + `on pace`** = within 1 day of pace
+- **Solid grey `█`** = elapsed days before the pace window
+- **Green solid `█`** = days behind quota pace
+- **White solid `█`** = today
+- **Red hatched `░`** = days ahead of quota pace
+- **Grey hatched `░`** = remaining future days
+- **Red circle + `quota exceeded`** = usage is at or above 100%
 
-The colored section always includes **today**. For example, **3 days behind** colors today plus the two preceding days.
+The colored section always includes **today**. For example, **3 days behind** colors today plus the preceding three days, and **3 days ahead** colors today plus the next three days.
 
 If the quota API is unavailable, the script falls back to a dim `Quota: day/month` indicator.
 
@@ -52,7 +53,7 @@ If the quota API is unavailable, the script falls back to a dim `Quota: day/mont
 - **Context bar**: green under 75%, yellow at 75%+, red at 90%+
 - **Unused context bar cells**: solid grey
 - **Token values only** are colored: bright yellow at 10K+, yellow at 100K+, red at 1M+
-- **Quota pace**: green = behind, yellow = on pace, red = ahead
+- **Quota pace**: green = behind, white = on pace/today, red = ahead
 
 ## Requirements
 
@@ -126,8 +127,8 @@ echo $null | pwsh -NoProfile -File .\statusline.ps1
 
 1. Copilot CLI pipes a JSON payload to stdin on each refresh.
 2. `statusline.ps1` parses the payload and extracts model, token, duration, path, and lines-changed data.
-3. The script fetches quota data from `https://api.github.com/copilot_internal/user`.
-4. Quota usage is compared against calendar progress for the current month.
+3. The script fetches quota data from `https://api.github.com/copilot_internal/user` and reads both `percent_remaining` and `entitlement`.
+4. Quota usage is compared against calendar progress for the current month using time-of-day-aware rounding.
 5. Two ANSI-colored lines are written to stdout for Copilot CLI to render.
 
 ### GitHub Token Resolution
