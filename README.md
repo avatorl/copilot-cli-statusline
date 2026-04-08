@@ -19,7 +19,7 @@ The third line is available for any extra segments you want, but it is **disable
 The default layout is:
 
 ```text
-gpt-5.4 (high) | ██████████ 22% 400K | in 1.7M out 27K | 54m | 5 p.req. | Quota: ████████░░░░░░░░░░░░░░░░░░░░░░ 3.2d behind (160 p.req.)
+gpt-5.4 (high) | [bar chart] 22% 400K | in 1.7M out 27K cached 350K | 54m | 5 p.req. | Quota: [chart - quota pace tracker] 3.2d behind (160 p.req.)
 D:\GITHUB\my-project | +695 -146
 ```
 
