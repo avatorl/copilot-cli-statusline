@@ -11,7 +11,7 @@ A Windows PowerShell status line for [GitHub Copilot CLI](https://docs.github.co
 The current script renders **two lines**:
 
 ```text
-gpt-5.4 (high) | ██████████ 22% 400K | in 1.7M out 27K | 54m | 5 p.req. | Quota: ████████░░░░░░░░░░░░░░░░░░░░░░ 3.2 days behind
+gpt-5.4 (high) | ██████████ 22% 400K | in 1.7M out 27K | 54m | 5 p.req. | Quota: ████████░░░░░░░░░░░░░░░░░░░░░░ 3.2 days behind (160 p.req.)
 D:\GITHUB\my-project | +695 -146
 ```
 
@@ -37,14 +37,16 @@ D:\GITHUB\my-project | +695 -146
 
 The quota segment renders the current month as a compact calendar:
 
-- **Solid grey `█`** = elapsed days before the pace window
-- **Green solid `█`** = days behind quota pace
-- **White solid `█`** = today
-- **Red hatched `░`** = days ahead of quota pace
-- **Grey hatched `░`** = remaining future days
+- **Solid grey `█`** = elapsed past days outside the pace deviation
+- **Green solid `█`** = behind-pace spillover into previous days
+- **White solid `█`** = today, always shown as a single white bar
+- **Red hatched `░`** = ahead-of-pace spillover into future days
+- **Grey hatched `░`** = future days outside the pace deviation
 - **Red circle + `quota exceeded`** = usage is at or above 100%
 
-The colored section always includes **today**. For example, **3 days behind** colors today plus the preceding three days, and **3 days ahead** colors today plus the next three days.
+Today stays white. The green or red overlay appears only when the time-of-day-aware deviation rounds to at least **0.5 day** of spillover beyond today. For example, **3 days behind** shows three green bars before today, and **3 days ahead** shows three red hatched bars after today.
+
+When the user is behind pace and the Copilot quota API returns `entitlement`, the label also includes an unrealized premium request hint such as `(160 p.req.)`.
 
 If the quota API is unavailable, the script falls back to a dim `Quota: day/month` indicator.
 
@@ -128,7 +130,7 @@ echo $null | pwsh -NoProfile -File .\statusline.ps1
 1. Copilot CLI pipes a JSON payload to stdin on each refresh.
 2. `statusline.ps1` parses the payload and extracts model, token, duration, path, and lines-changed data.
 3. The script fetches quota data from `https://api.github.com/copilot_internal/user` and reads both `percent_remaining` and `entitlement`.
-4. Quota usage is compared against calendar progress for the current month using time-of-day-aware rounding.
+4. Quota usage is compared against calendar progress for the current month using time-of-day-aware rounding and spillover-based bar rendering.
 5. Two ANSI-colored lines are written to stdout for Copilot CLI to render.
 
 ### GitHub Token Resolution
