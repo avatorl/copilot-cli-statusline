@@ -2,12 +2,45 @@
 # Set to $true to log raw stdin JSON to statusline.stdin.log (for debugging).
 $DebugLog = $false
 
+# ─── Status Line Layout ───────────────────────────────────────────────────────
+# Define which segments appear on each output line and in what order.
+# Remove or comment out any name to hide that segment.
+#
+# Line 1 segment names:
+#   model              - Active model name
+#   context_bar        - Context-window usage bar and percentage
+#   tokens             - Cumulative input / output token counts
+#   duration           - Total session wall-clock time
+#   premium_requests   - Premium request count (p.req.)
+#   quota              - Monthly quota pacing bar (fetches GitHub API)
+#
+# Line 2 segment names:
+#   path               - Current workspace / working directory
+#   lines_changed      - Lines added / removed this session (+N -N)
+#
+$Line1Layout = @(
+    'model'
+    'context_bar'
+    'tokens'
+    'duration'
+    'premium_requests'
+    'quota'
+)
+
+$Line2Layout = @(
+    'path'
+    'lines_changed'
+)
+# ─────────────────────────────────────────────────────────────────────────────
+
 # Copilot CLI Status Line Script (Windows PowerShell)
 #
 # Renders a two-line status bar from Copilot's JSON payload piped to stdin.
 #
 # LINE 1: model | context bar % size | in/out tokens | duration | p.req. | quota pace
+#         (configurable — see $Line1Layout above)
 # LINE 2: cwd path | +lines -lines
+#         (configurable — see $Line2Layout above)
 #
 # ─── STDIN PAYLOAD PARAMETERS ────────────────────────────────────────────────
 #
@@ -80,6 +113,7 @@ $segmentSeparator = " $dim|$rst "
 # ─── Bar Characters ──────────────────────────────────────────────────────────
 $filledChar = "█"
 $hatchedChar = "░"
+$darkShadeChar = "▓"
 
 # ─── Pace Display Labels ─────────────────────────────────────────────────────
 # "behind" = under quota pace (good), "ahead" = over quota pace (bad)
@@ -417,7 +451,7 @@ function Get-CopilotQuotaData {
 #
 # Bar layout (left→right, always exactly daysInMonth bars):
 #   [grey-solid × todayIndex] [green-solid × pastGreenBars]
-#   [white-solid × 1 (today)] [red-hatched × futureRedBars] [grey-hatched × remaining]
+#   [pace-colored dark shade × 1 (today)] [red-hatched × futureRedBars] [grey-light × remaining]
 #
 # Pace is computed in fractional days, time-of-day aware. Rounding uses AwayFromZero
 # so a deviation rounds to a visible bar only when it reaches 0.5 days of spillover.
@@ -435,9 +469,9 @@ function Get-QuotaPaceSegment($quotaData) {
     $usedPct     = if ($quotaData) { $quotaData.UsedPct }     else { $null }
     $entitlement = if ($quotaData) { $quotaData.Entitlement } else { $null }
 
-    # ── No data: show grey bar with white today and date ─────────────────────
+    # ── No data: show a dim calendar with dark-shade today and light future ──
     if ($null -eq $usedPct) {
-        $cal = "$dim$($filledChar * $todayIndex)$rst$white$filledChar$rst$dim$($hatchedChar * $futureCount)$rst"
+        $cal = "$dim$($filledChar * $todayIndex)$darkShadeChar$($hatchedChar * $futureCount)$rst"
         return "Quota: $cal $dim$($now.Day)/$daysInMonth$rst"
     }
 
@@ -449,7 +483,7 @@ function Get-QuotaPaceSegment($quotaData) {
 
     # ── Exceeded: 100%+ quota consumed ───────────────────────────────────────
     if ($usedPct -ge 100) {
-        $cal = "$dim$($filledChar * $todayIndex)$rst$white$filledChar$rst$red$($hatchedChar * $futureCount)$rst"
+        $cal = "$dim$($filledChar * $todayIndex)$rst$red$darkShadeChar$($hatchedChar * $futureCount)$rst"
         return "Quota: $cal ${red}🔴 quota exceeded$rst"
     }
 
@@ -460,7 +494,7 @@ function Get-QuotaPaceSegment($quotaData) {
         $barCount  = [int][math]::Round($spillover, [System.MidpointRounding]::AwayFromZero)
         if ($barCount -gt 0) {
             $futureRedBars = [math]::Min($barCount, $futureCount)
-            $cal = "$dim$($filledChar * $todayIndex)$rst$white$filledChar$rst$red$($hatchedChar * $futureRedBars)$rst$dim$($hatchedChar * ($futureCount - $futureRedBars))$rst"
+            $cal = "$dim$($filledChar * $todayIndex)$rst$red$darkShadeChar$($hatchedChar * $futureRedBars)$rst$dim$($hatchedChar * ($futureCount - $futureRedBars))$rst"
             return "Quota: $cal $red$('{0:0.0}' -f $daysDelta) days $aheadText$rst"
         }
     }
@@ -481,13 +515,13 @@ function Get-QuotaPaceSegment($quotaData) {
                 if ($pReq -gt 0) { $pReqHint = " ($pReq p.req.)" }
             }
 
-            $cal = "$dim$($filledChar * ($todayIndex - $pastGreenBars))$rst$green$($filledChar * $pastGreenBars)$rst$white$filledChar$rst$dim$($hatchedChar * $futureCount)$rst"
+            $cal = "$dim$($filledChar * ($todayIndex - $pastGreenBars))$rst$green$($filledChar * $pastGreenBars)$darkShadeChar$rst$dim$($hatchedChar * $futureCount)$rst"
             return "Quota: $cal $green$('{0:0.0}' -f $daysDelta) days $behindText$pReqHint$rst"
         }
     }
 
     # ── On pace: deviation rounds to zero bars — within half a day of target.
-    $cal = "$dim$($filledChar * $todayIndex)$rst$white$filledChar$rst$dim$($hatchedChar * $futureCount)$rst"
+    $cal = "$dim$($filledChar * $todayIndex)$rst$white$darkShadeChar$rst$dim$($hatchedChar * $futureCount)$rst"
     return "Quota: $cal $white$onPaceText$rst"
 }
 
@@ -500,38 +534,49 @@ $rawStdin = Get-OptionalStdin
 Write-StdinLog $rawStdin
 $contextPayload = ConvertFrom-JsonObjectOrNull $rawStdin
 
-# ─── Line 1: Session metadata ───────────────────────────────────────────────
-$line1Segments = New-Object System.Collections.Generic.List[string]
+# ─── Fetch quota data once (skipped if 'quota' is not in any layout) ─────────
+$allLayoutSegments = $Line1Layout + $Line2Layout
+$quotaData = if ($allLayoutSegments -contains 'quota') { Get-CopilotQuotaData } else { $null }
 
-$modelDisplayName = Get-ModelDisplayName $contextPayload
-if ($modelDisplayName) { $line1Segments.Add("$cyan$modelDisplayName$rst") }
+# ─── Segment resolver ────────────────────────────────────────────────────────
+# Returns the rendered string for a named segment, or $null if unavailable.
+function Resolve-Segment([string]$name) {
+    switch ($name) {
+        'model' {
+            $d = Get-ModelDisplayName $contextPayload
+            if ($d) { return "$cyan$d$rst" } else { return $null }
+        }
+        'context_bar' {
+            return Get-ContextUsageSegment $contextPayload
+        }
+        'tokens' {
+            return Get-ContextSummary $contextPayload
+        }
+        'duration' {
+            return Get-TotalDurationDisplay $contextPayload
+        }
+        'premium_requests' {
+            $n = Get-TotalPremiumRequests $contextPayload
+            if ($null -ne $n) { return "$n p.req." } else { return $null }
+        }
+        'quota' {
+            return Get-QuotaPaceSegment $quotaData
+        }
+        'path' {
+            return Get-WorkspaceDisplayPath $contextPayload
+        }
+        'lines_changed' {
+            return Get-LinesChangedStats $contextPayload
+        }
+        default {
+            return $null
+        }
+    }
+}
 
-$contextUsageSegment = Get-ContextUsageSegment $contextPayload
-if ($contextUsageSegment) { $line1Segments.Add($contextUsageSegment) }
+# ─── Build and output each line ──────────────────────────────────────────────
+$line1Segments = $Line1Layout | ForEach-Object { Resolve-Segment $_ }
+$line2Segments = $Line2Layout | ForEach-Object { Resolve-Segment $_ }
 
-$contextSegment = Get-ContextSummary $contextPayload
-if ($contextSegment) { $line1Segments.Add($contextSegment) }
-
-$durationDisplay = Get-TotalDurationDisplay $contextPayload
-if ($durationDisplay) { $line1Segments.Add($durationDisplay) }
-
-$totalPremiumRequests = Get-TotalPremiumRequests $contextPayload
-if ($null -ne $totalPremiumRequests) { $line1Segments.Add("$totalPremiumRequests p.req.") }
-
-# ─── Quota pacing ────────────────────────────────────────────────────────────
-$quotaData   = Get-CopilotQuotaData
-$paceSegment = Get-QuotaPaceSegment $quotaData
-
-# Append pace to line 1.
-$line1Segments.Add($paceSegment)
-$line1 = Join-StatusSegments $line1Segments
-
-# ─── Line 2: Path and lines changed ─────────────────────────────────────────
-$workspaceDisplayPath = Get-WorkspaceDisplayPath $contextPayload
-$line2Parts = @($workspaceDisplayPath)
-$linesChanged = Get-LinesChangedStats $contextPayload
-if ($linesChanged) { $line2Parts += $linesChanged }
-
-# ─── Output ──────────────────────────────────────────────────────────────────
-Write-Output $line1
-Write-Output ($line2Parts -join " | ")
+Write-Output (Join-StatusSegments $line1Segments)
+Write-Output (Join-StatusSegments $line2Segments)
