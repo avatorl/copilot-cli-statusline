@@ -62,6 +62,7 @@ $OutputEncoding = $utf8NoBom
 $esc = [char]27
 $rst = "$esc[0m"
 $dim = "$esc[90m"
+$lightGrey = "$esc[38;2;110;110;110m"  # #6e6e6e - medium grey for labels
 $cyan = "$esc[36m"
 $green = "$esc[32m"
 $yellow = "$esc[33m"
@@ -218,14 +219,15 @@ function Get-UsageAnsiColor($value) {
 # DISPLAY COMPONENT FUNCTIONS
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Formats a token value with prefix, coloring only the value (e.g. "in 2.3M" where only "2.3M" is colored).
+# Formats a token value with prefix, coloring the prefix light grey and the value based on thresholds (e.g. "in 2.3M" where "in" is light grey).
 function Format-ColoredToken([string]$prefix, $value) {
     $number = ConvertTo-NullableInt $value
     if ($null -eq $number) { return $null }
     $formattedValue = Format-CompactTokens $number
     $color = Get-TokenAnsiColor $number
-    if ($color) { return "$prefix $color$formattedValue$rst" }
-    return "$prefix $formattedValue"
+    $coloredPrefix = "$script:lightGrey$prefix$rst"
+    if ($color) { return "$coloredPrefix $color$formattedValue$rst" }
+    return "$coloredPrefix $formattedValue"
 }
 
 # Renders a fixed-width 10-char bar chart from a percentage (0–100).
@@ -440,7 +442,7 @@ function Get-QuotaPaceSegment($quotaData) {
     # ── No data: show a dim calendar with dark-shade today and light future ──
     if ($null -eq $usedPct) {
         $cal = "$dim$($filledChar * $todayIndex)$darkShadeChar$($hatchedChar * $futureCount)$rst"
-        return "Quota: $cal $dim$($now.Day)/$daysInMonth$rst"
+        return "$cal $dim$($now.Day)/$daysInMonth$rst"
     }
 
     # Fractional elapsed days since month start (includes partial current day).
@@ -452,7 +454,7 @@ function Get-QuotaPaceSegment($quotaData) {
     # ── Exceeded: 100%+ quota consumed ───────────────────────────────────────
     if ($usedPct -ge 100) {
         $cal = "$dim$($filledChar * $todayIndex)$rst$red$darkShadeChar$($hatchedChar * $futureCount)$rst"
-        return "Quota: $cal ${red}🔴 quota exceeded$rst"
+        return "$cal ${red}🔴 quota exceeded$rst"
     }
 
     # ── Ahead (over pace, bad): today absorbs the remaining fraction of the day;
@@ -471,7 +473,7 @@ function Get-QuotaPaceSegment($quotaData) {
             }
             
             $cal = "$dim$($filledChar * $todayIndex)$rst$red$darkShadeChar$($hatchedChar * $futureRedBars)$rst$dim$($hatchedChar * ($futureCount - $futureRedBars))$rst"
-            return "Quota: $cal $red$('{0:0.0}' -f $daysDelta)d $aheadText$pReqHint$rst"
+            return "$cal $red$('{0:0.0}' -f $daysDelta)d $aheadText$pReqHint$rst"
         }
     }
 
@@ -492,13 +494,13 @@ function Get-QuotaPaceSegment($quotaData) {
             }
 
             $cal = "$dim$($filledChar * ($todayIndex - $pastGreenBars))$rst$green$($filledChar * $pastGreenBars)$darkShadeChar$rst$dim$($hatchedChar * $futureCount)$rst"
-            return "Quota: $cal $green$('{0:0.0}' -f $daysDelta)d $behindText$pReqHint$rst"
+            return "$cal $green$('{0:0.0}' -f $daysDelta)d $behindText$pReqHint$rst"
         }
     }
 
     # ── On pace: deviation rounds to zero bars — within half a day of target.
     $cal = "$dim$($filledChar * $todayIndex)$rst$white$darkShadeChar$rst$dim$($hatchedChar * $futureCount)$rst"
-    return "Quota: $cal $white$onPaceText$rst"
+    return "$cal $white$onPaceText$rst"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
