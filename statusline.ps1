@@ -60,15 +60,28 @@ $OutputEncoding = $utf8NoBom
 
 # ─── ANSI Colors ─────────────────────────────────────────────────────────────
 $esc = [char]27
-$rst = "$esc[0m"
-$dim = "$esc[90m"
-$lightGrey = "$esc[38;2;110;110;110m"  # #6e6e6e - medium grey for labels
-$cyan = "$esc[36m"
+$rst = "$esc[0m" # resets color back to default for the subsequent text
+
+# Standard colors (30-37)
+# $black = "$esc[30m"
+$red = "$esc[31m"
 $green = "$esc[32m"
 $yellow = "$esc[33m"
+# $blue = "$esc[34m"
+# $magenta = "$esc[35m"
+$cyan = "$esc[36m"
+# $white = "$esc[37m"
+
+# Bright/intense colors (90-97)
+$dim = "$esc[90m"                          # Bright Black (dark grey)
+$brightRed = "$esc[91m"
+# $brightGreen = "$esc[92m"
 $brightYellow = "$esc[93m"
-$red = "$esc[31m"
-$white = "$esc[97m"
+# $brightBlue = "$esc[94m"
+# $brightMagenta = "$esc[95m"
+# $brightCyan = "$esc[96m"
+$white = "$esc[97m"                        # Bright White
+
 $segmentSeparator = " $dim|$rst "
 
 # ─── Bar Characters ──────────────────────────────────────────────────────────
@@ -196,11 +209,12 @@ function Format-DurationFromMilliseconds($value) {
 # COLOR FUNCTIONS
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Returns ANSI color based on token count thresholds: ≥1M red, ≥100K yellow, ≥10K bright yellow.
+# Returns ANSI color based on token count thresholds: ≥10M red, ≥1M bright red, ≥100K yellow, ≥10K bright yellow.
 function Get-TokenAnsiColor($value) {
     $number = ConvertTo-NullableInt $value
     if ($null -eq $number) { return $null }
-    if ($number -ge 1000000) { return $red }
+    if ($number -ge 10000000) { return $red }
+    if ($number -ge 1000000) { return $brightRed }
     if ($number -ge 100000) { return $yellow }
     if ($number -ge 10000) { return $brightYellow }
     return $null
@@ -219,13 +233,18 @@ function Get-UsageAnsiColor($value) {
 # DISPLAY COMPONENT FUNCTIONS
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Formats a token value with prefix, coloring the prefix light grey and the value based on thresholds (e.g. "in 2.3M" where "in" is light grey).
+# Formats a token value with prefix, coloring the prefix dim and the value based on thresholds (e.g. "in 2.3M" where "in" is dim).
+# Special case: "cached" values use default color (no coloring).
 function Format-ColoredToken([string]$prefix, $value) {
     $number = ConvertTo-NullableInt $value
     if ($null -eq $number) { return $null }
     $formattedValue = Format-CompactTokens $number
+    $coloredPrefix = "$script:dim$prefix$rst"
+    
+    # "cached" values use default color (same as duration/p.req.)
+    if ($prefix -eq "cached") { return "$coloredPrefix $formattedValue" }
+    
     $color = Get-TokenAnsiColor $number
-    $coloredPrefix = "$script:lightGrey$prefix$rst"
     if ($color) { return "$coloredPrefix $color$formattedValue$rst" }
     return "$coloredPrefix $formattedValue"
 }
@@ -340,7 +359,7 @@ function Get-ContextSummary($payload) {
     return [string]::Join(" ", $segments)
 }
 
-# Returns green "+N" red "-N" from cost.total_lines_added/removed.
+# Returns green "+N" bright red "-N" from cost.total_lines_added/removed (standard terminal colors).
 function Get-LinesChangedStats($payload) {
     if ($null -eq $payload -or $null -eq $payload.cost) { return $null }
 
@@ -351,7 +370,7 @@ function Get-LinesChangedStats($payload) {
     }
 
     $addedStr = if ($null -ne $added) { "$green+$added$rst" } else { "$green+0$rst" }
-    $removedStr = if ($null -ne $removed) { "$red-$removed$rst" } else { "$red-0$rst" }
+    $removedStr = if ($null -ne $removed) { "$brightRed-$removed$rst" } else { "$brightRed-0$rst" }
     return "$addedStr $removedStr"
 }
 

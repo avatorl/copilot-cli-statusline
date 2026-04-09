@@ -19,7 +19,7 @@ The third line is available for any extra segments you want, but it is **disable
 The default layout is:
 
 ```text
-gpt-5.4 (high) | [bar chart] 22% 400K | in 1.7M out 27K cached 350K | 54m | 5 p.req. | Quota: [chart - quota pace tracker] 3.2d behind (160 p.req.)
+gpt-5.4 (high) | [bar chart] 22% 400K | in 1.7M out 27K cached 350K | 54m | 5 p.req. | [chart - quota pace tracker] 3.2d behind (160 p.req.)
 D:\GITHUB\my-project | +695 -146
 ```
 
@@ -29,7 +29,7 @@ D:\GITHUB\my-project | +695 -146
 
 | Segment | What it tells you | Source field(s) | Notes |
 |---------|-------------------|-----------------|-------|
-| **Model** | Which model is answering right now | `model.display_name`, fallback `model.id` | Shown in cyan |
+| **Model** | Which model is answering right now | `model.display_name`, fallback `model.id` | Uses the terminal's default text color |
 | **Context usage** | How full the current context window is | `context_window.used_percentage`, `context_window.context_window_size` | Renders a 10-cell bar, rounded percent, and compact size |
 | **Tokens** | How many input, output, and cached tokens the session has spent so far | `context_window.total_input_tokens`, `context_window.total_output_tokens`, `context_window.total_cache_read_tokens`, `context_window.total_cache_write_tokens` | Shows `in`, `out`, and `cached` totals; `cached` = read + write |
 | **Duration** | How long the session has been running | `cost.total_duration_ms` | Rounded to whole minutes; hidden under 30 seconds |
@@ -41,7 +41,7 @@ D:\GITHUB\my-project | +695 -146
 | Segment | What it tells you | Source field(s) | Notes |
 |---------|-------------------|-----------------|-------|
 | **Path** | Which folder Copilot currently considers the working directory | `cwd`, fallback `workspace.current_dir` | Uses `Get-Location` if neither is present |
-| **Lines changed** | How many lines were added and removed during this session | `cost.total_lines_added`, `cost.total_lines_removed` | Shows green `+N` and red `-N` |
+| **Lines changed** | How many lines were added and removed during this session | `cost.total_lines_added`, `cost.total_lines_removed` | Shows green `+N` and bright red `-N` |
 
 ### Line 3 - Optional Extra Line
 
@@ -132,7 +132,7 @@ Today is **white only when on pace**. When usage is behind or ahead, the today b
 
 When the Copilot quota API returns `entitlement`, the pace label also includes a premium request estimate such as `(160 p.req.)`. For **behind**, that number represents requests still available relative to calendar pace; for **ahead**, it represents how many premium requests are already over pace.
 
-If the quota API is unavailable, the script falls back to a dim `Quota: day/month` indicator.
+If the quota API is unavailable, the script falls back to a dim `day/month` indicator after the quota calendar.
 
 ## Color Rules
 
@@ -154,7 +154,7 @@ If the quota API is unavailable, the script falls back to a dim `Quota: day/mont
   </tr>
   <tr>
     <td>Token values</td>
-    <td>🟡 bright yellow at 10K+, 🟠 yellow at 100K+, 🔴 red at 1M+</td>
+    <td>🟡 bright yellow at 10K+, 🟠 yellow at 100K+, 🔴 bright red at 1M+, dark red at 10M+</td>
     <td><code>in 27K</code>, <code>in 174K</code>, <code>in 1.7M</code></td>
   </tr>
   <tr>
@@ -164,7 +164,7 @@ If the quota API is unavailable, the script falls back to a dim `Quota: day/mont
   </tr>
   <tr>
     <td>Lines changed</td>
-    <td>Added lines are green; removed lines are red</td>
+    <td>Added lines are green; removed lines are bright red</td>
     <td><code>+695 -146</code></td>
   </tr>
 </table>
