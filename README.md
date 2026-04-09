@@ -1,6 +1,6 @@
 # Copilot CLI Status Line
 
-A customizable status line for [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) that keeps the important session details visible right in your terminal: model, context usage, token spend, session duration, premium requests, quota pace, current folder, and lines changed.
+A customizable status line for [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) that keeps the important session details visible right in your terminal: model, context usage, token spend, session duration, premium requests, quota pace, current folder, session name, and lines changed.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 ![PowerShell 7+](https://img.shields.io/badge/PowerShell-7%2B-5391FE)
@@ -12,7 +12,7 @@ The script can render **up to three configurable lines**. By default, it uses th
 
 The first line is the "how is this session going?" line: it shows the active model, how full the context window is, how many input/output tokens have been spent, how long the session has been running, how many premium requests this session has used, and whether your monthly premium quota is currently running **behind pace** (good), **on pace**, or **ahead of budget** (bad).
 
-The second line is the "where am I and what changed?" line: it shows the current working directory and the session's cumulative added/removed lines so you can keep your bearings while you work.
+The second line is the "where am I and what changed?" line: it shows the current working directory, the Copilot session name, and the session's cumulative added/removed lines so you can keep your bearings while you work.
 
 The third line is available for any extra segments you want, but it is **disabled by default**.
 
@@ -20,7 +20,7 @@ The default layout is:
 
 ```text
 gpt-5.4 (high) | [bar chart] 22% 400K | in 1.7M out 27K cached 350K | 54m | 5 p.req. | [chart - quota pace tracker] 3.2d behind (160 p.req.)
-D:\GITHUB\my-project | +695 -146
+D:\GITHUB\my-project | Fix quota bar math | +695 -146
 ```
 
 <img width="1905" height="181" alt="Status line screenshot" src="./assets/readme-statusline.png" />
@@ -41,6 +41,7 @@ D:\GITHUB\my-project | +695 -146
 | Segment | What it tells you | Source field(s) | Notes |
 |---------|-------------------|-----------------|-------|
 | **Path** | Which folder Copilot currently considers the working directory | `cwd`, fallback `workspace.current_dir` | Uses `Get-Location` if neither is present |
+| **Session name** | The current Copilot session's human-readable name | `session_name` | Rendered exactly as provided by Copilot |
 | **Lines changed** | How many lines were added and removed during this session | `cost.total_lines_added`, `cost.total_lines_removed` | Shows green `+N` and bright red `-N` |
 
 ### Line 3 - Optional Extra Line
@@ -65,6 +66,7 @@ $Line1Layout = @(
 
 $Line2Layout = @(
     'path'
+    'session_name'
     'lines_changed'
 )
 
@@ -85,6 +87,7 @@ Available segment names:
 | `premium_requests` | 1 | Premium request count | `cost.total_premium_requests` |
 | `quota` | 1 | Monthly premium quota pacing indicator | Copilot quota API `percent_remaining`, `entitlement` |
 | `path` | 2 | Current workspace / working directory | `cwd`, fallback `workspace.current_dir` |
+| `session_name` | 2 | Human-readable Copilot session name | `session_name` |
 | `lines_changed` | 2 | Added and removed lines from the session payload | `cost.total_lines_added`, `cost.total_lines_removed` |
 
 If `quota` is removed from all layout arrays, the script skips the GitHub quota API call entirely.
@@ -227,8 +230,8 @@ Start a new Copilot CLI session and the status line should appear automatically.
 There is no automated test suite. Test by piping sample payloads into `statusline.ps1`.
 
 ```powershell
-# Full payload (with cache tokens)
-'{"cwd":"D:\\TEST","model":{"id":"gpt-5.4","display_name":"gpt-5.4 (high)"},"workspace":{"current_dir":"D:\\TEST"},"cost":{"total_duration_ms":3241747,"total_lines_added":100,"total_lines_removed":50,"total_premium_requests":5},"context_window":{"total_input_tokens":1744196,"total_output_tokens":26870,"total_cache_read_tokens":85000,"total_cache_write_tokens":12000,"context_window_size":400000,"used_percentage":22}}' | pwsh -NoProfile -File .\statusline.ps1
+# Full payload (with cache tokens and session name)
+'{"cwd":"D:\\TEST","session_name":"Fix quota bar math","model":{"id":"gpt-5.4","display_name":"gpt-5.4 (high)"},"workspace":{"current_dir":"D:\\TEST"},"cost":{"total_duration_ms":3241747,"total_lines_added":100,"total_lines_removed":50,"total_premium_requests":5},"context_window":{"total_input_tokens":1744196,"total_output_tokens":26870,"total_cache_read_tokens":85000,"total_cache_write_tokens":12000,"context_window_size":400000,"used_percentage":22}}' | pwsh -NoProfile -File .\statusline.ps1
 
 # Minimal payload
 '{"context_window":{"context_window_size":400000,"used_percentage":0}}' | pwsh -NoProfile -File .\statusline.ps1
@@ -287,7 +290,7 @@ The Copilot CLI pipes a JSON object to stdin on each refresh. Two payload shapes
 |-------|------|----------|---------|
 | `cwd` | `string` | Yes | Current working directory |
 | `session_id` | `string` | No | Unique session identifier |
-| `session_name` | `string` | No | Human-readable session name |
+| `session_name` | `string` | Yes | Human-readable session name |
 | `transcript_path` | `string` | No | Path to the session transcript folder |
 | `version` | `string` | No | Copilot CLI version |
 

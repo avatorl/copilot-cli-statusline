@@ -16,6 +16,7 @@ $DebugLog = $false
 #
 # Line 2 segment names:
 #   path               - Current workspace / working directory
+#   session_name       - Human-readable Copilot session name
 #   lines_changed      - Lines added / removed this session (+N -N)
 #
 # Line 3 segment names:
@@ -32,6 +33,7 @@ $Line1Layout = @(
 
 $Line2Layout = @(
     'path'
+    'session_name'
     'lines_changed'
 )
 
@@ -45,7 +47,7 @@ $Line3Layout = @(
 #
 # LINE 1: model | context bar % size | in/out/cached tokens | duration | p.req. | quota pace
 #         (configurable — see $Line1Layout above)
-# LINE 2: cwd path | +lines -lines
+# LINE 2: cwd path | session name | +lines -lines
 #         (configurable — see $Line2Layout above)
 # LINE 3: disabled by default
 #         (configurable — see $Line3Layout above)
@@ -288,6 +290,15 @@ function Get-WorkspaceDisplayPath($payload) {
     } else { $path = (Get-Location).Path }
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
     return ($path -replace '/', '\')
+}
+
+# Returns the raw human-readable session name from session_name.
+function Get-SessionDisplayName($payload) {
+    if ($payload -and $payload.session_name) {
+        $name = [string]$payload.session_name
+        if (-not [string]::IsNullOrWhiteSpace($name)) { return $name }
+    }
+    return $null
 }
 
 # Returns model.display_name, falling back to model.id.
@@ -561,6 +572,9 @@ function Resolve-Segment([string]$name) {
         }
         'path' {
             return Get-WorkspaceDisplayPath $contextPayload
+        }
+        'session_name' {
+            return Get-SessionDisplayName $contextPayload
         }
         'lines_changed' {
             return Get-LinesChangedStats $contextPayload
