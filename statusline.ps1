@@ -33,8 +33,8 @@ $Line1Layout = @(
 
 $Line2Layout = @(
     'path'
-    'session_name'
     'lines_changed'
+    'session_name'
 )
 
 $Line3Layout = @(
@@ -47,7 +47,7 @@ $Line3Layout = @(
 #
 # LINE 1: model | context bar % size | in/out/cached tokens | duration | p.req. | quota pace
 #         (configurable — see $Line1Layout above)
-# LINE 2: cwd path | session name | +lines -lines
+# LINE 2: cwd path | +lines -lines | session name
 #         (configurable — see $Line2Layout above)
 # LINE 3: disabled by default
 #         (configurable — see $Line3Layout above)

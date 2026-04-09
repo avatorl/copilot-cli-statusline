@@ -12,7 +12,7 @@ The script can render **up to three configurable lines**. By default, it uses th
 
 The first line is the "how is this session going?" line: it shows the active model, how full the context window is, how many input/output tokens have been spent, how long the session has been running, how many premium requests this session has used, and whether your monthly premium quota is currently running **behind pace** (good), **on pace**, or **ahead of budget** (bad).
 
-The second line is the "where am I and what changed?" line: it shows the current working directory, the Copilot session name, and the session's cumulative added/removed lines so you can keep your bearings while you work.
+The second line is the "where am I and what changed?" line: it shows the current working directory, the session's cumulative added/removed lines, and the Copilot session name so you can keep your bearings while you work.
 
 The third line is available for any extra segments you want, but it is **disabled by default**.
 
@@ -20,7 +20,7 @@ The default layout is:
 
 ```text
 gpt-5.4 (high) | [bar chart] 22% 400K | in 1.7M out 27K cached 350K | 54m | 5 p.req. | [chart - quota pace tracker] 3.2d behind (160 p.req.)
-D:\GITHUB\my-project | Fix quota bar math | +695 -146
+D:\GITHUB\my-project | +695 -146 | Fix quota bar math
 ```
 
 <img width="1905" height="181" alt="Status line screenshot" src="./assets/readme-statusline.png" />
@@ -66,8 +66,8 @@ $Line1Layout = @(
 
 $Line2Layout = @(
     'path'
-    'session_name'
     'lines_changed'
+    'session_name'
 )
 
 $Line3Layout = @(
