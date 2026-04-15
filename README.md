@@ -87,7 +87,7 @@ gpt-5.4 (high) | [context bar] 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/?
 D:\GITHUB\my-project | +100 -50 | Fix quota bar math
 ```
 
-**Important:** the quota-related parts of those examples are placeholders for live account values, so your monthly used count, pace, and hint will change over time.
+**Note:** bracketed labels such as `[context bar]` and `[quota calendar]` are readable stand-ins for the real Unicode/ANSI chart output used by the script.
 
 ### Line 1: session overview
 
