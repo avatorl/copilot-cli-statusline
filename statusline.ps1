@@ -39,7 +39,7 @@ $Line2Layout = @(
     'lines_changed'
     'session_name'
     'repo_name'
-    # 'git_sync'
+    'git_sync'
 )
 
 $Line3Layout = @(
