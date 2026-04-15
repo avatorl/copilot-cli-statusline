@@ -70,21 +70,21 @@ Typical layout using segment names:
 
 ```text
 Line 1: model | context_bar | tokens | duration | premium_requests | quota
-Line 2: path | lines_changed | session_name | repo_name git_sync
+Line 2: path | lines_changed | session_name | repo_name | git_sync
 ```
 
 Rendered example with quota data available:
 
 ```text
 gpt-5.4 (high) | [context bar] 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/342 of 1500 p.req. | [quota calendar] 3.2d behind (160 p.req.)
-D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline 🟢 synced
+D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline | 🟢 synced
 ```
 
 Rendered example when quota lookup is unavailable:
 
 ```text
 gpt-5.4 (high) | [context bar] 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/? of ? p.req. | [quota calendar] 15/30
-D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline 🟢 synced
+D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline | 🟢 synced
 ```
 
 **Note:** bracketed labels such as `[context bar]` and `[quota calendar]` are readable stand-ins for the real Unicode/ANSI chart output used by the script.
@@ -108,7 +108,7 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statu
 | **Lines changed** | Added and removed lines in this session | Green `+N`, bright red `-N` |
 | **Session name** | Copilot's human-readable session title | Rendered exactly as Copilot sends it |
 | **Repo name** | Git remote path from `origin` | Shows `owner/repo`; hidden when the folder is not a git repo or `origin` is missing |
-| **Git sync** | Whether the current branch matches its local tracking ref and whether the working tree is dirty | Rendered immediately after repo name with no pipe separator; a green `🟢` plus `synced` means fully synced and clean, while a dim `⚪` plus `synced dirty`, `ahead N`, `behind N`, `diverged A/B`, or `no upstream` means the repo is not in the fully synced/clean state. Status labels use the normal value text color so they match adjacent values such as `repo_name`. Hidden outside git repos. Tracking refs refresh in the background when stale, so the status line does not pause on network calls |
+| **Git sync** | Whether the current branch matches its local tracking ref and whether the working tree is dirty | Rendered as its own segment using the same `|` separator as the rest of the line; a green `🟢` plus `synced` means fully synced and clean, while a dim `⚪` plus `synced dirty`, `ahead N`, `behind N`, `diverged A/B`, or `no upstream` means the repo is not in the fully synced/clean state. Status labels use the normal value text color so they match adjacent values such as `repo_name`. Hidden outside git repos. Tracking refs refresh in the background when stale, so the status line does not pause on network calls |
 
 ### Line 3: optional
 

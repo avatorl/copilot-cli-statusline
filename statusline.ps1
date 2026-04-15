@@ -58,7 +58,7 @@ $Line3Layout = @(
 #
 # LINE 1: model | context bar % size | in/out/cached tokens | duration | session/month-used of quota p.req. | quota pace
 #         (configurable — see $Line1Layout above)
-# LINE 2: cwd path | +lines -lines | session name | repo name + git sync
+# LINE 2: cwd path | +lines -lines | session name | repo name | git sync
 #         (configurable — see $Line2Layout above)
 # LINE 3: disabled by default
 #         (configurable — see $Line3Layout above)
@@ -986,19 +986,6 @@ function Resolve-Segment([string]$name) {
 $line1Segments = $Line1Layout | ForEach-Object { Resolve-Segment $_ }
 $line2Segments = $Line2Layout | ForEach-Object { Resolve-Segment $_ }
 $line3Segments = $Line3Layout | ForEach-Object { Resolve-Segment $_ }
-
-$repoNameIndex = [array]::IndexOf($Line2Layout, 'repo_name')
-$gitSyncIndex = [array]::IndexOf($Line2Layout, 'git_sync')
-if ($repoNameIndex -ge 0 -and $gitSyncIndex -eq ($repoNameIndex + 1)) {
-    $repoSegment = if ($repoNameIndex -lt $line2Segments.Count) { $line2Segments[$repoNameIndex] } else { $null }
-    $syncSegment = if ($gitSyncIndex -lt $line2Segments.Count) { $line2Segments[$gitSyncIndex] } else { $null }
-
-    if (-not [string]::IsNullOrWhiteSpace([string]$repoSegment) -and
-        -not [string]::IsNullOrWhiteSpace([string]$syncSegment)) {
-        $line2Segments[$repoNameIndex] = "$repoSegment $syncSegment"
-        $line2Segments[$gitSyncIndex] = $null
-    }
-}
 
 Write-Output (Join-StatusSegments $line1Segments)
 Write-Output (Join-StatusSegments $line2Segments)
