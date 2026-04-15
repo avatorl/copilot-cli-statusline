@@ -6,6 +6,12 @@ $DebugLog = $false
 # Define which segments appear on each output line and in what order.
 # Remove or comment out any name to hide that segment.
 #
+# Git refresh config:
+#   Git tracking refs are refreshed in the background when git_sync is enabled.
+#   The status line never waits for fetch to finish.
+$GitFetchRefreshSeconds = 300
+$GitFetchLockTimeoutSeconds = 600
+#
 # Line 1 segment names:
 #   model              - Active model name
 #   context_bar        - Context-window usage bar and percentage
@@ -294,19 +300,18 @@ function Get-WorkspaceDisplayPath($payload) {
     return ($path -replace '/', '\')
 }
 
-# Returns a stable Copilot session key for session-scoped caches.
-function Get-CopilotSessionKey($payload) {
-    if ($payload) {
-        if ($payload.session_id) {
-            $sessionId = [string]$payload.session_id
-            if (-not [string]::IsNullOrWhiteSpace($sessionId)) { return $sessionId.Trim() }
-        }
-        if ($payload.transcript_path) {
-            $transcriptPath = [string]$payload.transcript_path
-            if (-not [string]::IsNullOrWhiteSpace($transcriptPath)) { return $transcriptPath.Trim() }
-        }
+# Returns the preferred git command path for the workspace.
+# Use workspace.current_dir when available so git caches stay stable across cwd changes inside a repo.
+function Get-GitWorkspacePath($payload) {
+    $path = $null
+    if ($payload -and $payload.workspace -and $payload.workspace.current_dir) {
+        $path = [string]$payload.workspace.current_dir
+    } else {
+        $path = Get-WorkspaceDisplayPath $payload
     }
-    return $null
+
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    return ($path -replace '/', '\')
 }
 
 # Returns the local cache root used for small statusline state files.
@@ -326,39 +331,41 @@ function Get-Sha256Hex([string]$text) {
     return ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
 }
 
-# Returns the marker-file path used to remember a one-time fetch per session/workspace.
-function Get-GitFetchMarkerPath($payload) {
-    $sessionKey = Get-CopilotSessionKey $payload
-    $workspacePath = Get-WorkspaceDisplayPath $payload
-    if ([string]::IsNullOrWhiteSpace($sessionKey) -or [string]::IsNullOrWhiteSpace($workspacePath)) { return $null }
+# Returns the repo-scoped marker base path used by background git refresh.
+function Get-GitFetchMarkerBasePath([string]$workspacePath) {
+    if ([string]::IsNullOrWhiteSpace($workspacePath)) { return $null }
 
-    $cacheKey = Get-Sha256Hex "$sessionKey`n$($workspacePath.ToLowerInvariant())"
+    $cacheKey = Get-Sha256Hex $workspacePath.ToLowerInvariant()
     if ([string]::IsNullOrWhiteSpace($cacheKey)) { return $null }
 
-    return Join-Path (Join-Path (Get-StatuslineStateRoot) 'git-fetch') "$cacheKey.marker"
+    return Join-Path (Join-Path (Get-StatuslineStateRoot) 'git-fetch') $cacheKey
 }
 
-# Returns $true when the workspace path is inside a git work tree.
-function Test-IsGitRepository([string]$workspacePath) {
-    if ([string]::IsNullOrWhiteSpace($workspacePath)) { return $false }
+# Returns the age of a marker file in seconds, or $null when it does not exist.
+function Get-FileAgeSeconds([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
 
     try {
-        $result = (& git -C $workspacePath rev-parse --is-inside-work-tree 2>$null | Out-String).Trim()
-        return ($result -eq 'true')
+        $item = Get-Item -LiteralPath $path -ErrorAction Stop
+        return [double]([DateTimeOffset]::UtcNow - [DateTimeOffset]$item.LastWriteTimeUtc).TotalSeconds
     } catch {
-        return $false
+        return $null
     }
 }
 
-# Refreshes remote-tracking refs once per Copilot session/workspace when git_sync is enabled.
-function Invoke-GitFetchOncePerSession($payload) {
-    $workspacePath = Get-WorkspaceDisplayPath $payload
-    $markerPath = Get-GitFetchMarkerPath $payload
-    if ([string]::IsNullOrWhiteSpace($workspacePath) -or [string]::IsNullOrWhiteSpace($markerPath)) { return }
-    if (-not (Test-IsGitRepository $workspacePath)) { return }
-    if (Test-Path -LiteralPath $markerPath) { return }
+# Starts a repo-scoped background fetch when tracking refs are stale.
+# Rendering always uses local git data immediately and never waits on the network.
+function Start-GitFetchRefreshInBackground($gitSnapshot) {
+    if ($null -eq $gitSnapshot -or -not $gitSnapshot.IsGitRepo) { return }
+    if ([string]::IsNullOrWhiteSpace($gitSnapshot.Upstream)) { return }
+    if ($script:GitFetchRefreshSeconds -le 0) { return }
 
-    $markerDirectory = Split-Path -Parent $markerPath
+    $workspacePath = $gitSnapshot.WorkspacePath
+    $markerBasePath = Get-GitFetchMarkerBasePath $workspacePath
+    if ([string]::IsNullOrWhiteSpace($workspacePath) -or [string]::IsNullOrWhiteSpace($markerBasePath)) { return }
+
+    $markerDirectory = Split-Path -Parent $markerBasePath
     if ([string]::IsNullOrWhiteSpace($markerDirectory)) { return }
 
     try {
@@ -369,22 +376,40 @@ function Invoke-GitFetchOncePerSession($payload) {
         return
     }
 
-    $timestamp = (Get-Date).ToString('o')
-    $statusLine = 'fetch attempted'
-    try {
-        & git -C $workspacePath fetch --quiet 2>$null | Out-Null
-        $statusLine = 'fetch completed'
-    } catch {
-        $statusLine = 'fetch failed'
+    $attemptPath = "$markerBasePath.attempt"
+    $successPath = "$markerBasePath.success"
+    $lockPath = "$markerBasePath.lock"
+
+    $lockAgeSeconds = Get-FileAgeSeconds $lockPath
+    if ($null -ne $lockAgeSeconds -and $lockAgeSeconds -lt $script:GitFetchLockTimeoutSeconds) { return }
+    if ($null -ne $lockAgeSeconds) {
+        try { Remove-Item -LiteralPath $lockPath -Force -ErrorAction Stop } catch {}
     }
 
+    $attemptAgeSeconds = Get-FileAgeSeconds $attemptPath
+    $successAgeSeconds = Get-FileAgeSeconds $successPath
+    $attemptIsFresh = ($null -ne $attemptAgeSeconds -and $attemptAgeSeconds -lt $script:GitFetchRefreshSeconds)
+    $successIsFresh = ($null -ne $successAgeSeconds -and $successAgeSeconds -lt $script:GitFetchRefreshSeconds)
+    if ($attemptIsFresh -or $successIsFresh) { return }
+
+    $timestamp = [DateTimeOffset]::UtcNow.ToString('o')
     try {
-        Set-Content -Path $markerPath -Value @(
-            "workspace=$workspacePath"
-            "time=$timestamp"
-            "status=$statusLine"
-        ) -Encoding utf8
-    } catch {}
+        Set-Content -Path $attemptPath -Value $timestamp -Encoding ascii
+        Set-Content -Path $lockPath -Value $timestamp -Encoding ascii
+    } catch {
+        return
+    }
+
+    $escapedWorkspacePath = $workspacePath.Replace('"', '""')
+    $escapedSuccessPath = $successPath.Replace('"', '""')
+    $escapedLockPath = $lockPath.Replace('"', '""')
+    $cmdCommand = "git -C ""$escapedWorkspacePath"" fetch --quiet --no-tags --prune 1>nul 2>nul && (copy /y nul ""$escapedSuccessPath"" >nul) & del /q ""$escapedLockPath"" >nul 2>nul"
+
+    try {
+        Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/c', $cmdCommand) -WindowStyle Hidden | Out-Null
+    } catch {
+        try { Remove-Item -LiteralPath $lockPath -Force -ErrorAction Stop } catch {}
+    }
 }
 
 # Parses a git remote URL into host/owner/repo parts.
@@ -440,7 +465,7 @@ function ConvertFrom-GitRemoteUrl([string]$remoteUrl) {
 # Returns git remote metadata for the current workspace by reading origin.
 # The status line hides git-derived segments when the directory is not a repo or origin is missing.
 function Get-GitOriginRemoteData($payload) {
-    $workspacePath = Get-WorkspaceDisplayPath $payload
+    $workspacePath = Get-GitWorkspacePath $payload
     if ([string]::IsNullOrWhiteSpace($workspacePath)) { return $null }
 
     try {
@@ -456,7 +481,7 @@ function Get-GitOriginRemoteData($payload) {
 # This is the preferred source for fast git-backed segments such as sync state because it
 # provides branch, upstream, ahead/behind, and dirty-state information from one local call.
 function Get-GitStatusSnapshot($payload) {
-    $workspacePath = Get-WorkspaceDisplayPath $payload
+    $workspacePath = Get-GitWorkspacePath $payload
     if ([string]::IsNullOrWhiteSpace($workspacePath)) { return $null }
 
     $output = $null
@@ -885,15 +910,15 @@ $quotaData = if (($allLayoutSegments -contains 'quota') -or
 }
 
 # ─── Fetch local git data once (skipped if git-based segments are not in any layout) ──
-if ($allLayoutSegments -contains 'git_sync') {
-    Invoke-GitFetchOncePerSession $contextPayload
-}
-
 $gitSnapshot = if (($allLayoutSegments -contains 'git_sync') -or
     ($allLayoutSegments -contains 'repo_name')) {
     Get-GitStatusSnapshot $contextPayload
 } else {
     $null
+}
+
+if (($allLayoutSegments -contains 'git_sync') -and $gitSnapshot) {
+    Start-GitFetchRefreshInBackground $gitSnapshot
 }
 
 $gitRemoteData = if (($allLayoutSegments -contains 'repo_name') -and $gitSnapshot -and $gitSnapshot.IsGitRepo) {
