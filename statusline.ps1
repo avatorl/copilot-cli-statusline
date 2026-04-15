@@ -97,9 +97,6 @@ $darkShadeChar = "▓"
 $behindText  = "behind"
 $onPaceText  = "on pace"
 $aheadText   = "ahead"
-$behindColor = $green
-$onPaceColor = $white   # neutral/informational; white is visually calm
-$aheadColor  = $red
 
 # ─── Debug Logging ───────────────────────────────────────────────────────────
 $scriptDirectory = Split-Path -Parent $PSCommandPath
@@ -254,7 +251,7 @@ function Format-ColoredToken([string]$prefix, $value) {
 
 # Renders a fixed-width 10-char bar chart from a percentage (0–100).
 # Works in double precision to avoid int-coercion rounding before the fill calculation.
-# Filled portion uses the provided color; unfilled portion is dim grey.
+# Filled portion uses solid blocks; unfilled portion uses dim hatched blocks.
 function Get-Bar($value, [string]$ansiColor, [int]$width = 10) {
     # Clamp to [0, 100] without int coercion so fractional percentages round correctly.
     $pct    = if ($null -ne $value) { [math]::Max(0.0, [math]::Min(100.0, [double]$value)) } else { 0.0 }
@@ -263,7 +260,7 @@ function Get-Bar($value, [string]$ansiColor, [int]$width = 10) {
     $empty  = $width - $filled
 
     $filledPart = if ($filled -gt 0) { $script:filledChar * $filled } else { "" }
-    $emptyPart  = if ($empty  -gt 0) { $script:filledChar * $empty  } else { "" }
+    $emptyPart  = if ($empty  -gt 0) { $script:hatchedChar * $empty  } else { "" }
     return "$ansiColor$filledPart$rst$script:dim$emptyPart$rst"
 }
 
@@ -422,9 +419,11 @@ function Get-GitHubAccessToken {
     return $null
 }
 
-# Queries the Copilot quota API; returns a PSCustomObject with UsedPct, UsedRequests,
-# and Entitlement,
-# or $null when the token is unavailable or the API call fails.
+# Queries the Copilot quota API; returns a PSCustomObject with:
+#   UsedPct      - monthly premium quota consumed as a percentage
+#   UsedRequests - monthly premium requests used (derived from entitlement + remaining %)
+#   Entitlement  - monthly premium request budget
+# Returns $null when the token is unavailable or the API call fails.
 function Get-CopilotQuotaData {
     $token = Get-GitHubAccessToken
     if (-not $token) { return $null }
@@ -458,6 +457,7 @@ function Get-CopilotQuotaData {
 }
 
 # Builds the monthly premium requests segment: "123 of 1500".
+# The value is account-level monthly usage from the live quota API, not the session payload.
 # Falls back to "? of ?" when quota data is unavailable or incomplete.
 function Get-MonthlyPremiumRequestsSegment($quotaData) {
     if ($null -eq $quotaData -or $null -eq $quotaData.UsedRequests -or $null -eq $quotaData.Entitlement) {
@@ -466,7 +466,19 @@ function Get-MonthlyPremiumRequestsSegment($quotaData) {
     return "$($quotaData.UsedRequests) of $($quotaData.Entitlement)"
 }
 
+# Converts a pace delta into an estimated premium-request count such as " (160 p.req.)".
+# Used only when the quota API returned an entitlement value.
+function Get-PremiumRequestPaceHint($daysDelta, $entitlement, $daysInMonth) {
+    if ($null -eq $entitlement) { return "" }
+
+    $pReq = [int][math]::Round($daysDelta / $daysInMonth * $entitlement, [System.MidpointRounding]::AwayFromZero)
+    if ($pReq -le 0) { return "" }
+    return " ($pReq p.req.)"
+}
+
 # Builds the combined premium requests segment: "2/338 p.req.".
+# Left side = this session's premium requests from Copilot CLI payload.
+# Right side = account-wide monthly used premium requests from the live quota API.
 # Slash separators use the same dim color as token labels such as "in" and "out".
 function Get-PremiumRequestsSegment($payload, $quotaData) {
     $sessionRequests = Get-TotalPremiumRequests $payload
@@ -531,11 +543,7 @@ function Get-QuotaPaceSegment($quotaData) {
             $futureRedBars = [math]::Min($barCount, $futureCount)
             
             # p.req. hint: requests that exceeded expected pace.
-            $pReqHint = ""
-            if ($null -ne $entitlement) {
-                $pReq = [int][math]::Round($daysDelta / $daysInMonth * $entitlement, [System.MidpointRounding]::AwayFromZero)
-                if ($pReq -gt 0) { $pReqHint = " ($pReq p.req.)" }
-            }
+            $pReqHint = Get-PremiumRequestPaceHint $daysDelta $entitlement $daysInMonth
             
             $cal = "$dim$($filledChar * $todayIndex)$rst$red$darkShadeChar$($hatchedChar * $futureRedBars)$rst$dim$($hatchedChar * ($futureCount - $futureRedBars))$rst"
             return "$cal $red$('{0:0.0}' -f $daysDelta)d $aheadText$pReqHint$rst"
@@ -552,11 +560,7 @@ function Get-QuotaPaceSegment($quotaData) {
             $pastGreenBars = [math]::Min($barCount, $todayIndex)
 
             # p.req. hint: requests that could have been consumed but weren't.
-            $pReqHint = ""
-            if ($null -ne $entitlement) {
-                $pReq = [int][math]::Round($daysDelta / $daysInMonth * $entitlement, [System.MidpointRounding]::AwayFromZero)
-                if ($pReq -gt 0) { $pReqHint = " ($pReq p.req.)" }
-            }
+            $pReqHint = Get-PremiumRequestPaceHint $daysDelta $entitlement $daysInMonth
 
             $cal = "$dim$($filledChar * ($todayIndex - $pastGreenBars))$rst$green$($filledChar * $pastGreenBars)$darkShadeChar$rst$dim$($hatchedChar * $futureCount)$rst"
             return "$cal $green$('{0:0.0}' -f $daysDelta)d $behindText$pReqHint$rst"
@@ -578,6 +582,8 @@ Write-StdinLog $rawStdin
 $contextPayload = ConvertFrom-JsonObjectOrNull $rawStdin
 
 # ─── Fetch quota data once (skipped if quota-based segments are not in any layout) ─
+# Quota-based segments can still render even when stdin is minimal or missing because they
+# come from the live Copilot quota API rather than the session payload.
 $allLayoutSegments = $Line1Layout + $Line2Layout + $Line3Layout
 $quotaData = if (($allLayoutSegments -contains 'quota') -or
     ($allLayoutSegments -contains 'premium_requests') -or
