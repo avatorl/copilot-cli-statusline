@@ -1,6 +1,6 @@
 # Copilot CLI Status Line
 
-A Windows PowerShell status line for [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli). It keeps the most useful session details visible in the terminal: model, context usage, token totals, session duration, premium requests, quota pace, current folder, session name, git repo/sync status, and lines changed.
+A Windows PowerShell status line for [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli). It keeps the most useful session details visible in the terminal: model, context usage, last-call and cumulative token totals, API and session duration, premium requests, quota pace, current folder, session name, git repo/sync/detail status, and lines changed.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 ![PowerShell 7+](https://img.shields.io/badge/PowerShell-7%2B-5391FE)
@@ -64,27 +64,30 @@ Start a new Copilot CLI session. The status line should appear automatically.
 
 ## What the Default Status Line Shows
 
-The script can render up to **three configurable lines**. By default it uses the first two and leaves the third line empty.
+The script can render up to **three configurable lines**. By default it uses all three.
 
 Typical layout using segment names:
 
 ```text
-Line 1: model | context_bar | tokens | duration | premium_requests | quota
-Line 2: path | lines_changed | session_name | repo_name | git_sync
+Line 1: model | context_bar | last_call_tokens | tokens | duration
+Line 2: path | lines_changed | session_name | repo_name | git_sync | git_detail
+Line 3: premium_requests | quota
 ```
 
 Rendered example with quota data available:
 
 ```text
-gpt-5.4 (high) | [context bar] 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/342 of 1500 p.req. | [quota calendar] 3.2d behind (160 p.req.)
-D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline | 🟢 synced
+gpt-5.4 (high) | [context bar] 22% 400K | last in 42K out 3K | in 1.7M out 27K cached 97K | API 12m of 54m
+D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline | 🟢 synced | main +1 ~2 ?3
+5/342 of 1500 p.req. | [quota calendar] 3.2d behind (160 p.req.)
 ```
 
 Rendered example when quota lookup is unavailable:
 
 ```text
-gpt-5.4 (high) | [context bar] 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/? of ? p.req. | [quota calendar] 15/30
-D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline | 🟢 synced
+gpt-5.4 (high) | [context bar] 22% 400K | last in 42K out 3K | in 1.7M out 27K cached 97K | API 12m of 54m
+D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline | 🟢 synced | main
+5/? of ? p.req. | [quota calendar] 15/30
 ```
 
 **Note:** bracketed labels such as `[context bar]` and `[quota calendar]` are readable stand-ins for the real Unicode/ANSI chart output used by the script.
@@ -95,10 +98,9 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statu
 |---------|---------|-------|
 | **Model** | The active model | Rendered in cyan |
 | **Context usage** | How full the current context window is | Shows a 10-cell bar, rounded percent, and window size |
+| **Last-call tokens** | Input/output tokens for the most recent request | Hidden until the payload includes last-call counts |
 | **Tokens** | Total input, output, and cached tokens so far | `cached` = cache reads + cache writes |
-| **Duration** | How long the session has been running | Hidden under 30 seconds |
-| **Premium requests** | `session/month-used of quota p.req.` | Session count, monthly used count, and monthly quota in one compact segment |
-| **Quota pace** | Whether you are under, on, or over monthly quota pace | Uses a compact month-shaped calendar |
+| **Duration** | API time and total session duration (e.g. `API 12m of 54m`) | Fallback behavior for API-only or total-only values is configurable |
 
 ### Line 2: workspace overview
 
@@ -109,10 +111,14 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statu
 | **Session name** | Copilot's human-readable session title | Rendered exactly as Copilot sends it |
 | **Repo name** | Git remote path from `origin` | Shows `owner/repo`; hidden when the folder is not a git repo or `origin` is missing |
 | **Git sync** | Whether the current branch matches its local tracking ref and whether the working tree is dirty | Rendered as its own segment using the same `|` separator as the rest of the line; a green `🟢 synced` means fully synced and clean, while a dim `⚪` plus `synced dirty`, `ahead N`, `behind N`, `diverged A/B`, or `no upstream` means the repo is not in the fully synced/clean state. Status labels use the normal value text color so they match adjacent values such as `repo_name`, except for the fully synced/clean state where `synced` is also green. Hidden outside git repos. Tracking refs refresh in the background when stale, so the status line does not pause on network calls |
+| **Git detail** | Current branch plus local change counts | Shows branch name and any conflict/staged/unstaged/untracked counts, for example `main !1 +1 ~2 ?3` where `!` = conflicts, `+` = staged, `~` = unstaged, and `?` = untracked |
 
-### Line 3: optional
+### Line 3: quota overview
 
-Line 3 is empty by default. You can move any supported segment there if you want more space.
+| Segment | Meaning | Notes |
+|---------|---------|-------|
+| **Premium requests** | `session/month-used of quota p.req.` | Session count, monthly used count, and monthly quota in one compact segment |
+| **Quota pace** | Whether you are under, on, or over monthly quota pace | Uses a compact month-shaped calendar |
 
 ## Understanding Premium Request Numbers
 
@@ -165,10 +171,9 @@ At the top of `statusline.ps1`, edit these arrays:
 $Line1Layout = @(
     'model'
     'context_bar'
+    'last_call_tokens'
     'tokens'
     'duration'
-    'premium_requests'
-    'quota'
 )
 
 $Line2Layout = @(
@@ -177,9 +182,12 @@ $Line2Layout = @(
     'session_name'
     'repo_name'
     'git_sync'
+    'git_detail'
 )
 
 $Line3Layout = @(
+    'premium_requests'
+    'quota'
 )
 ```
 
@@ -188,10 +196,12 @@ You can also tune background git refresh near the top of the script:
 ```powershell
 $GitFetchRefreshSeconds = 300
 $GitFetchLockTimeoutSeconds = 600
+$DurationFallbackMode = 'show-available'
 ```
 
 - `GitFetchRefreshSeconds` = how often `git_sync` may refresh tracking refs for a repo
 - `GitFetchLockTimeoutSeconds` = when to treat an old background-fetch lock as stale
+- `DurationFallbackMode` = `show-available` to show API-only or total-only values, or `require-both` to hide `duration` unless both exist
 
 You can:
 
@@ -206,15 +216,17 @@ You can:
 |--------------|--------------|---------------|
 | `model` | 1 | Active model name |
 | `context_bar` | 1 | Context usage bar, percent, and size |
+| `last_call_tokens` | 1 | Input and output token totals for the most recent call |
 | `tokens` | 1 | Input, output, and cached token totals |
-| `duration` | 1 | Session wall-clock time |
-| `premium_requests` | 1 | Session/month-used of quota premium requests |
+| `duration` | 1 | `API X of Y` duration display, with configurable fallback behavior |
+| `premium_requests` | 3 | Session/month-used of quota premium requests |
 | `premium_requests_month` | 1 | Monthly premium requests used out of total |
-| `quota` | 1 | Monthly quota pacing indicator |
+| `quota` | 3 | Monthly quota pacing indicator |
 | `path` | 2 | Current working directory |
 | `session_name` | 2 | Copilot session name |
 | `repo_name` | 2 | Git remote owner/repo from `origin` |
 | `git_sync` | 2 | Local tracking-ref sync state (`🟢 synced`, `⚪ synced dirty`, `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, `⚪ no upstream`; non-green states can also end in `dirty`) |
+| `git_detail` | 2 | Branch plus compact conflict/staged/unstaged/untracked counts such as `main +1 ~2 ?3` |
 | `lines_changed` | 2 | Added and removed lines |
 
 If `premium_requests`, `premium_requests_month`, and `quota` are all removed from every layout, the script skips the quota API call entirely.

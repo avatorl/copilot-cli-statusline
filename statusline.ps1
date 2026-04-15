@@ -12,11 +12,17 @@ $DebugLog = $false
 $GitFetchRefreshSeconds = 300
 $GitFetchLockTimeoutSeconds = 600
 #
+# Duration fallback config:
+#   show-available = show "API X of Y" when both values exist, otherwise show whichever exists
+#   require-both   = hide the duration segment unless both API and total durations exist
+$DurationFallbackMode = 'show-available'
+#
 # Line 1 segment names:
 #   model              - Active model name
 #   context_bar        - Context-window usage bar and percentage
+#   last_call_tokens   - Token counts for the most recent call
 #   tokens             - Cumulative input / output token counts
-#   duration           - Total session wall-clock time
+#   duration           - API duration plus total session duration
 #   premium_requests   - Session/month-used of quota premium requests (p.req.)
 #   premium_requests_month - Monthly premium requests used of total
 #   quota              - Monthly quota pacing bar (fetches GitHub API)
@@ -26,6 +32,7 @@ $GitFetchLockTimeoutSeconds = 600
 #   session_name       - Human-readable Copilot session name
 #   repo_name          - Git remote owner/repo from origin
 #   git_sync           - Upstream sync / dirty status from git metadata
+#   git_detail         - Branch plus staged/unstaged/untracked/conflict counts
 #   lines_changed      - Lines added / removed this session (+N -N)
 #
 # Line 3 segment names:
@@ -34,10 +41,9 @@ $GitFetchLockTimeoutSeconds = 600
 $Line1Layout = @(
     'model'
     'context_bar'
+    'last_call_tokens'
     'tokens'
     'duration'
-    'premium_requests'
-    'quota'
 )
 
 $Line2Layout = @(
@@ -46,9 +52,12 @@ $Line2Layout = @(
     'session_name'
     'repo_name'
     'git_sync'
+    'git_detail'
 )
 
 $Line3Layout = @(
+    'premium_requests'
+    'quota'
 )
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -56,11 +65,11 @@ $Line3Layout = @(
 #
 # Renders up to three configurable status lines from Copilot's JSON payload piped to stdin.
 #
-# LINE 1: model | context bar % size | in/out/cached tokens | duration | session/month-used of quota p.req. | quota pace
+# LINE 1: model | context bar % size | last-call tokens | in/out/cached tokens | duration
 #         (configurable — see $Line1Layout above)
-# LINE 2: cwd path | +lines -lines | session name | repo name | git sync
+# LINE 2: cwd path | +lines -lines | session name | repo name | git sync | git detail
 #         (configurable — see $Line2Layout above)
-# LINE 3: disabled by default
+# LINE 3: session/month-used of quota p.req. | quota pace
 #         (configurable — see $Line3Layout above)
 #
 # The full stdin payload field reference lives in README.md.
@@ -199,6 +208,7 @@ function Format-DurationFromMilliseconds($value) {
     if ($null -eq $milliseconds) { return $null }
 
     $totalSeconds = [math]::Max(0, [int][math]::Floor($milliseconds / 1000))
+    if ($totalSeconds -lt 30) { return $null }
     $totalMinutes = [int][math]::Floor($totalSeconds / 60)
 
     # Round up if remaining seconds ≥ 30
@@ -258,6 +268,20 @@ function Format-ColoredToken([string]$prefix, $value) {
     if ($color) { return "$coloredPrefix $color$formattedValue$rst" }
     return "$coloredPrefix $formattedValue"
 }
+
+# Last-call token size segment — shows tokens for the most recent call (input/output)
+function Get-LastCallTokensSegment($payload) {
+    if ($null -eq $payload -or -not $payload.context_window) { return $null }
+    $cw = $payload.context_window
+    $in = ConvertTo-NullableInt $cw.last_call_input_tokens
+    $out = ConvertTo-NullableInt $cw.last_call_output_tokens
+    if ($null -eq $in -and $null -eq $out) { return $null }
+    $parts = @()
+    if ($in -ne $null) { $parts += Format-ColoredToken 'last in' $in }
+    if ($out -ne $null) { $parts += Format-ColoredToken 'out' $out }
+    return [string]::Join(' ', $parts)
+}
+
 
 # Renders a fixed-width 10-char bar chart from a percentage (0–100).
 # Works in double precision to avoid int-coercion rounding before the fill calculation.
@@ -502,6 +526,10 @@ function Get-GitStatusSnapshot($payload) {
             HasStaged     = $false
             HasUnstaged   = $false
             HasUntracked  = $false
+            StagedCount   = 0
+            UnstagedCount = 0
+            UntrackedCount = 0
+            ConflictCount = 0
             IsDirty       = $false
         }
     }
@@ -516,6 +544,10 @@ function Get-GitStatusSnapshot($payload) {
         HasStaged     = $false
         HasUnstaged   = $false
         HasUntracked  = $false
+        StagedCount   = 0
+        UnstagedCount = 0
+        UntrackedCount = 0
+        ConflictCount = 0
         IsDirty       = $false
     }
 
@@ -544,6 +576,7 @@ function Get-GitStatusSnapshot($payload) {
 
         if ($line.StartsWith('? ')) {
             $snapshot.HasUntracked = $true
+            $snapshot.UntrackedCount++
             $snapshot.IsDirty = $true
             continue
         }
@@ -551,6 +584,7 @@ function Get-GitStatusSnapshot($payload) {
         if ($line.StartsWith('u ')) {
             $snapshot.HasStaged = $true
             $snapshot.HasUnstaged = $true
+            $snapshot.ConflictCount++
             $snapshot.IsDirty = $true
             continue
         }
@@ -560,8 +594,14 @@ function Get-GitStatusSnapshot($payload) {
                 $indexStatus = $line.Substring(2, 1)
                 $workTreeStatus = $line.Substring(3, 1)
 
-                if ($indexStatus -ne '.') { $snapshot.HasStaged = $true }
-                if ($workTreeStatus -ne '.') { $snapshot.HasUnstaged = $true }
+                if ($indexStatus -ne '.') {
+                    $snapshot.HasStaged = $true
+                    $snapshot.StagedCount++
+                }
+                if ($workTreeStatus -ne '.') {
+                    $snapshot.HasUnstaged = $true
+                    $snapshot.UnstagedCount++
+                }
                 if ($snapshot.HasStaged -or $snapshot.HasUnstaged) { $snapshot.IsDirty = $true }
             }
         }
@@ -597,10 +637,23 @@ function Get-TotalPremiumRequests($payload) {
     return $null
 }
 
-# Returns formatted duration string from cost.total_duration_ms.
+# Returns formatted duration string from cost.total_api_duration_ms and cost.total_duration_ms.
 function Get-TotalDurationDisplay($payload) {
     if ($payload -and $payload.cost) {
-        return Format-DurationFromMilliseconds $payload.cost.total_duration_ms
+        $apiMs = ConvertTo-NullableInt $payload.cost.total_api_duration_ms
+        $totalMs = ConvertTo-NullableInt $payload.cost.total_duration_ms
+
+        $apiStr = if ($null -ne $apiMs) { Format-DurationFromMilliseconds $apiMs } else { $null }
+        $totalStr = if ($null -ne $totalMs) { Format-DurationFromMilliseconds $totalMs } else { $null }
+        $mode = [string]$script:DurationFallbackMode
+
+        if ($apiStr -and $totalStr) {
+            return "$dim" + "API" + "$rst " + "$cyan$apiStr$rst $dim" + "of" + "$rst $totalStr"
+        }
+
+        if ($mode -eq 'require-both') { return $null }
+        if ($totalStr) { return $totalStr }
+        if ($apiStr) { return "$dim" + "API" + "$rst " + "$cyan$apiStr$rst" }
     }
     return $null
 }
@@ -643,6 +696,31 @@ function Get-GitSyncSegment($gitSnapshot) {
     }
 
     return "$dim⚪$rst no upstream$dirtyTextSuffix"
+}
+
+# Builds a compact git detail segment: branch name plus local change counts when present.
+function Get-GitDetailSegment($gitSnapshot) {
+    if ($null -eq $gitSnapshot -or -not $gitSnapshot.IsGitRepo) { return $null }
+
+    $parts = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($gitSnapshot.Branch) -and $gitSnapshot.Branch -ne '(unknown)') {
+        $parts.Add([string]$gitSnapshot.Branch)
+    }
+    if ($gitSnapshot.ConflictCount -gt 0) {
+        $parts.Add("$brightRed!$($gitSnapshot.ConflictCount)$rst")
+    }
+    if ($gitSnapshot.StagedCount -gt 0) {
+        $parts.Add("$green+$($gitSnapshot.StagedCount)$rst")
+    }
+    if ($gitSnapshot.UnstagedCount -gt 0) {
+        $parts.Add("$yellow~$($gitSnapshot.UnstagedCount)$rst")
+    }
+    if ($gitSnapshot.UntrackedCount -gt 0) {
+        $parts.Add("$dim?$($gitSnapshot.UntrackedCount)$rst")
+    }
+
+    if ($parts.Count -eq 0) { return $null }
+    return [string]::Join(' ', $parts)
 }
 
 # Builds context usage segment for line 1: colored/grey bars + "23% 400K".
@@ -918,6 +996,7 @@ $quotaData = if (($allLayoutSegments -contains 'quota') -or
 
 # ─── Fetch local git data once (skipped if git-based segments are not in any layout) ──
 $gitSnapshot = if (($allLayoutSegments -contains 'git_sync') -or
+    ($allLayoutSegments -contains 'git_detail') -or
     ($allLayoutSegments -contains 'repo_name')) {
     Get-GitStatusSnapshot $contextPayload
 } else {
@@ -944,6 +1023,9 @@ function Resolve-Segment([string]$name) {
         }
         'context_bar' {
             return Get-ContextUsageSegment $contextPayload
+        }
+        'last_call_tokens' {
+            return Get-LastCallTokensSegment $contextPayload
         }
         'tokens' {
             return Get-ContextSummary $contextPayload
@@ -973,6 +1055,9 @@ function Resolve-Segment([string]$name) {
         'git_sync' {
             return Get-GitSyncSegment $gitSnapshot
         }
+        'git_detail' {
+            return Get-GitDetailSegment $gitSnapshot
+        }
         'lines_changed' {
             return Get-LinesChangedStats $contextPayload
         }
@@ -987,10 +1072,16 @@ $line1Segments = $Line1Layout | ForEach-Object { Resolve-Segment $_ }
 $line2Segments = $Line2Layout | ForEach-Object { Resolve-Segment $_ }
 $line3Segments = $Line3Layout | ForEach-Object { Resolve-Segment $_ }
 
-Write-Output (Join-StatusSegments $line1Segments)
-Write-Output (Join-StatusSegments $line2Segments)
-
+$line1 = Join-StatusSegments $line1Segments
+$line2 = Join-StatusSegments $line2Segments
 $line3 = Join-StatusSegments $line3Segments
+
+if (-not [string]::IsNullOrWhiteSpace($line1)) {
+    Write-Output $line1
+}
+if (-not [string]::IsNullOrWhiteSpace($line2)) {
+    Write-Output $line2
+}
 if (-not [string]::IsNullOrWhiteSpace($line3)) {
     Write-Output $line3
 }
