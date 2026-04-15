@@ -247,32 +247,80 @@ When enabled, raw stdin payloads are appended to `statusline.stdin.log` next to 
 
 ## Payload Fields Used by the Script
 
-These are the main Copilot CLI payload fields currently used:
+Copilot CLI sends a JSON payload to stdin on each refresh. Two payload shapes are common:
 
-| Field | Purpose |
-|-------|---------|
-| `cwd` | Current working directory |
-| `session_name` | Human-readable session title |
-| `model.display_name` | Preferred model label |
-| `model.id` | Fallback model label |
-| `workspace.current_dir` | Fallback working directory |
-| `cost.total_lines_added` | Lines added in the session |
-| `cost.total_lines_removed` | Lines removed in the session |
-| `cost.total_duration_ms` | Session wall-clock time |
-| `cost.total_premium_requests` | Session premium request count |
-| `context_window.total_input_tokens` | Total input tokens |
-| `context_window.total_output_tokens` | Total output tokens |
-| `context_window.total_cache_read_tokens` | Cache-read tokens |
-| `context_window.total_cache_write_tokens` | Cache-write tokens |
-| `context_window.context_window_size` | Maximum context size |
-| `context_window.used_percentage` | Percent of context currently used |
+- **Minimal payload**: usually just `context_window` when a session starts
+- **Full payload**: includes model, workspace, cost, and context fields
 
-External data used by the script:
+`Used now` shows whether the current script reads that field:
 
-| Source | Purpose |
-|--------|---------|
-| `quota_snapshots.premium_interactions.percent_remaining` | Remaining monthly premium quota percentage |
-| `quota_snapshots.premium_interactions.entitlement` | Monthly premium request budget |
+- **✅** = currently used
+- **○** = available in the payload but not currently used
+
+### Top-level fields
+
+| Field | Type | Used now | Meaning |
+|-------|------|----------|---------|
+| `cwd` | `string` | ✅ | Current working directory |
+| `session_id` | `string` | ○ | Unique session identifier |
+| `session_name` | `string` | ✅ | Human-readable session name |
+| `transcript_path` | `string` | ○ | Path to the session transcript folder |
+| `version` | `string` | ○ | Copilot CLI version |
+
+### `model`
+
+| Field | Type | Used now | Meaning |
+|-------|------|----------|---------|
+| `model.id` | `string` | ✅ | Model identifier such as `gpt-5.4` |
+| `model.display_name` | `string` | ✅ | Friendly display name |
+
+### `workspace`
+
+| Field | Type | Used now | Meaning |
+|-------|------|----------|---------|
+| `workspace.current_dir` | `string` | ✅ | Workspace root directory |
+
+### `cost`
+
+| Field | Type | Used now | Meaning |
+|-------|------|----------|---------|
+| `cost.total_api_duration_ms` | `int` | ○ | Cumulative API call time in milliseconds |
+| `cost.total_lines_added` | `int` | ✅ | Total lines added in this session |
+| `cost.total_lines_removed` | `int` | ✅ | Total lines removed in this session |
+| `cost.total_duration_ms` | `int` | ✅ | Total session wall-clock time in milliseconds |
+| `cost.total_premium_requests` | `int` | ✅ | Premium request count for this session |
+
+### `context_window`
+
+| Field | Type | Used now | Meaning |
+|-------|------|----------|---------|
+| `context_window.total_input_tokens` | `int` | ✅ | Cumulative input tokens |
+| `context_window.total_output_tokens` | `int` | ✅ | Cumulative output tokens |
+| `context_window.total_cache_read_tokens` | `int` | ✅ | Tokens served from cache |
+| `context_window.total_cache_write_tokens` | `int` | ✅ | Tokens written to cache |
+| `context_window.total_tokens` | `int` | ○ | Sum of input and output tokens |
+| `context_window.context_window_size` | `int` | ✅ | Max context window size |
+| `context_window.used_percentage` | `int` | ✅ | Percent of context window used |
+| `context_window.remaining_percentage` | `int` | ○ | Percent of context window free |
+| `context_window.remaining_tokens` | `int` | ○ | Tokens still available |
+| `context_window.last_call_input_tokens` | `int` | ○ | Input tokens in the last call |
+| `context_window.last_call_output_tokens` | `int` | ○ | Output tokens in the last call |
+
+### `context_window.current_usage`
+
+| Field | Type | Used now | Meaning |
+|-------|------|----------|---------|
+| `context_window.current_usage.input_tokens` | `int` | ○ | Raw input tokens used |
+| `context_window.current_usage.output_tokens` | `int` | ○ | Raw output tokens used |
+| `context_window.current_usage.cache_creation_input_tokens` | `int` | ○ | Cache creation tokens |
+| `context_window.current_usage.cache_read_input_tokens` | `int` | ○ | Cache read tokens |
+
+### External API used by the script
+
+| Source | Used now | Meaning |
+|--------|----------|---------|
+| `quota_snapshots.premium_interactions.percent_remaining` | ✅ | Remaining premium quota percentage |
+| `quota_snapshots.premium_interactions.entitlement` | ✅ | Monthly premium request budget used for monthly totals and pace hints |
 
 ## License
 
