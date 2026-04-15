@@ -19,6 +19,7 @@ $DebugLog = $false
 #   path               - Current workspace / working directory
 #   session_name       - Human-readable Copilot session name
 #   repo_name          - Git remote owner/repo from origin
+#   git_sync           - Upstream sync status from local git metadata
 #   lines_changed      - Lines added / removed this session (+N -N)
 #
 # Line 3 segment names:
@@ -38,6 +39,7 @@ $Line2Layout = @(
     'lines_changed'
     'session_name'
     'repo_name'
+    # 'git_sync'
 )
 
 $Line3Layout = @(
@@ -357,6 +359,99 @@ function Get-GitOriginRemoteData($payload) {
     return $null
 }
 
+# Builds a shared local git snapshot from one cheap status command.
+# This is the preferred source for fast git-backed segments such as sync state because it
+# provides branch, upstream, ahead/behind, and dirty-state information without any network call.
+function Get-GitStatusSnapshot($payload) {
+    $workspacePath = Get-WorkspaceDisplayPath $payload
+    if ([string]::IsNullOrWhiteSpace($workspacePath)) { return $null }
+
+    $output = $null
+    try {
+        $output = (& git -C $workspacePath status --porcelain=2 --branch 2>$null | Out-String)
+    } catch {
+        $output = $null
+    }
+
+    if ([string]::IsNullOrWhiteSpace($output)) {
+        return [PSCustomObject]@{
+            WorkspacePath = $workspacePath
+            IsGitRepo     = $false
+            Branch        = $null
+            Upstream      = $null
+            Ahead         = $null
+            Behind        = $null
+            HasStaged     = $false
+            HasUnstaged   = $false
+            HasUntracked  = $false
+            IsDirty       = $false
+        }
+    }
+
+    $snapshot = [PSCustomObject]@{
+        WorkspacePath = $workspacePath
+        IsGitRepo     = $true
+        Branch        = $null
+        Upstream      = $null
+        Ahead         = $null
+        Behind        = $null
+        HasStaged     = $false
+        HasUnstaged   = $false
+        HasUntracked  = $false
+        IsDirty       = $false
+    }
+
+    foreach ($rawLine in ($output -split "`r?`n")) {
+        $line = $rawLine.TrimEnd()
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+        $branchHeadMatch = [regex]::Match($line, '^# branch\.head (.+)$')
+        if ($branchHeadMatch.Success) {
+            $snapshot.Branch = $branchHeadMatch.Groups[1].Value
+            continue
+        }
+
+        $upstreamMatch = [regex]::Match($line, '^# branch\.upstream (.+)$')
+        if ($upstreamMatch.Success) {
+            $snapshot.Upstream = $upstreamMatch.Groups[1].Value
+            continue
+        }
+
+        $aheadBehindMatch = [regex]::Match($line, '^# branch\.ab \+(\d+) -(\d+)$')
+        if ($aheadBehindMatch.Success) {
+            $snapshot.Ahead = [int]$aheadBehindMatch.Groups[1].Value
+            $snapshot.Behind = [int]$aheadBehindMatch.Groups[2].Value
+            continue
+        }
+
+        if ($line.StartsWith('? ')) {
+            $snapshot.HasUntracked = $true
+            $snapshot.IsDirty = $true
+            continue
+        }
+
+        if ($line.StartsWith('u ')) {
+            $snapshot.HasStaged = $true
+            $snapshot.HasUnstaged = $true
+            $snapshot.IsDirty = $true
+            continue
+        }
+
+        if ($line.StartsWith('1 ') -or $line.StartsWith('2 ')) {
+            if ($line.Length -ge 4) {
+                $indexStatus = $line.Substring(2, 1)
+                $workTreeStatus = $line.Substring(3, 1)
+
+                if ($indexStatus -ne '.') { $snapshot.HasStaged = $true }
+                if ($workTreeStatus -ne '.') { $snapshot.HasUnstaged = $true }
+                if ($snapshot.HasStaged -or $snapshot.HasUnstaged) { $snapshot.IsDirty = $true }
+            }
+        }
+    }
+
+    return $snapshot
+}
+
 # Returns the raw human-readable session name from session_name.
 function Get-SessionDisplayName($payload) {
     if ($payload -and $payload.session_name) {
@@ -390,6 +485,38 @@ function Get-TotalDurationDisplay($payload) {
         return Format-DurationFromMilliseconds $payload.cost.total_duration_ms
     }
     return $null
+}
+
+# Builds the upstream sync segment from the local git snapshot.
+# Green circle means the local branch matches the local tracking ref.
+# Grey circle means the branch is not currently in the synced state.
+function Get-GitSyncSegment($gitSnapshot) {
+    if ($null -eq $gitSnapshot -or -not $gitSnapshot.IsGitRepo) { return $null }
+
+    $greenCircle = "$green🟢$rst"
+    $greyCircle = "$dim⚪$rst"
+
+    if ([string]::IsNullOrWhiteSpace($gitSnapshot.Upstream)) {
+        return "$greyCircle no upstream"
+    }
+
+    $ahead = if ($null -ne $gitSnapshot.Ahead) { [int]$gitSnapshot.Ahead } else { 0 }
+    $behind = if ($null -ne $gitSnapshot.Behind) { [int]$gitSnapshot.Behind } else { 0 }
+
+    if ($ahead -eq 0 -and $behind -eq 0) {
+        return $greenCircle
+    }
+    if ($ahead -gt 0 -and $behind -gt 0) {
+        return "$greyCircle diverged $ahead/$behind"
+    }
+    if ($ahead -gt 0) {
+        return "$greyCircle ahead $ahead"
+    }
+    if ($behind -gt 0) {
+        return "$greyCircle behind $behind"
+    }
+
+    return "$greyCircle no upstream"
 }
 
 # Builds context usage segment for line 1: colored/grey bars + "23% 400K".
@@ -663,8 +790,15 @@ $quotaData = if (($allLayoutSegments -contains 'quota') -or
     $null
 }
 
-# ─── Fetch git remote data once (skipped if git-based segments are not in any layout) ──
-$gitRemoteData = if ($allLayoutSegments -contains 'repo_name') {
+# ─── Fetch local git data once (skipped if git-based segments are not in any layout) ──
+$gitSnapshot = if (($allLayoutSegments -contains 'git_sync') -or
+    ($allLayoutSegments -contains 'repo_name')) {
+    Get-GitStatusSnapshot $contextPayload
+} else {
+    $null
+}
+
+$gitRemoteData = if (($allLayoutSegments -contains 'repo_name') -and $gitSnapshot -and $gitSnapshot.IsGitRepo) {
     Get-GitOriginRemoteData $contextPayload
 } else {
     $null
@@ -705,6 +839,9 @@ function Resolve-Segment([string]$name) {
         'repo_name' {
             if ($gitRemoteData) { return $gitRemoteData.OwnerRepo }
             return $null
+        }
+        'git_sync' {
+            return Get-GitSyncSegment $gitSnapshot
         }
         'lines_changed' {
             return Get-LinesChangedStats $contextPayload

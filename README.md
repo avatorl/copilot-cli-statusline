@@ -109,6 +109,12 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statu
 | **Session name** | Copilot's human-readable session title | Rendered exactly as Copilot sends it |
 | **Repo name** | Git remote path from `origin` | Shows `owner/repo`; hidden when the folder is not a git repo or `origin` is missing |
 
+Optional line-2 git segment:
+
+| Segment | Meaning | Notes |
+|---------|---------|-------|
+| **Git sync** | Whether the current branch matches its local tracking ref | `🟢` = synced, `⚪` = not synced; hidden outside git repos |
+
 ### Line 3: optional
 
 Line 3 is empty by default. You can move any supported segment there if you want more space.
@@ -175,6 +181,7 @@ $Line2Layout = @(
     'lines_changed'
     'session_name'
     'repo_name'
+    # 'git_sync'
 )
 
 $Line3Layout = @(
@@ -202,6 +209,7 @@ You can:
 | `path` | 2 | Current working directory |
 | `session_name` | 2 | Copilot session name |
 | `repo_name` | 2 | Git remote owner/repo from `origin` |
+| `git_sync` | 2 | Local tracking-ref sync state (`🟢`, `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, `⚪ no upstream`) |
 | `lines_changed` | 2 | Added and removed lines |
 
 If `premium_requests`, `premium_requests_month`, and `quota` are all removed from every layout, the script skips the quota API call entirely.
@@ -251,8 +259,32 @@ Notes:
 - Quota lookup is optional. The rest of the status line still works without it.
 - Quota-based segments can still render even when the session payload is minimal or empty, because they come from the live quota API.
 - `repo_name` is resolved locally with `git remote get-url origin`, using the workspace path from the current Copilot payload.
+- `git_sync` is resolved locally with `git status --porcelain=2 --branch`, using the workspace path from the current Copilot payload.
 - The script does **not** read Windows Credential Manager directly.
 - `gh auth token` is used as a fallback when available.
+
+## Fast Git-Backed Ideas
+
+These are the low-cost git signals that fit the current "milliseconds, local-only" goal:
+
+| Idea | Best local git source | Why it is fast |
+|------|------------------------|----------------|
+| `repo_name` | `git remote get-url origin` | Single local config lookup |
+| `git_sync` | `git status --porcelain=2 --branch` | Branch, upstream, and ahead/behind in one command |
+| `git_branch` | `git status --porcelain=2 --branch` | Same snapshot as `git_sync` |
+| `git_dirty` | `git status --porcelain=2 --branch` | Same snapshot as `git_sync`; can detect staged/unstaged/untracked state |
+| `git_sha` | `git rev-parse --short HEAD` | Cheap local ref lookup |
+| `git_root` | `git rev-parse --show-toplevel` | Cheap local repo-root lookup |
+
+### What `git_sync` means
+
+- `🟢` means the current branch matches its **local tracking ref**
+- `⚪ ahead 2` means the branch is ahead of the local tracking ref by 2 commits
+- `⚪ behind 3` means the branch is behind the local tracking ref by 3 commits
+- `⚪ diverged 2/3` means the branch is both ahead and behind
+- `⚪ no upstream` means no tracking branch is configured
+
+**Important:** `🟢` does **not** mean "guaranteed current on GitHub right now." This script does not call `git fetch`, `git ls-remote`, or the GitHub API to check live remote state.
 
 ## Debug Logging
 
