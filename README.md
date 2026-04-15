@@ -70,21 +70,21 @@ Typical layout using segment names:
 
 ```text
 Line 1: model | context_bar | tokens | duration | premium_requests | quota
-Line 2: path | lines_changed | session_name
+Line 2: path | lines_changed | session_name | repo_name
 ```
 
 Rendered example with quota data available:
 
 ```text
 gpt-5.4 (high) | [context bar] 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/342 of 1500 p.req. | [quota calendar] 3.2d behind (160 p.req.)
-D:\GITHUB\my-project | +100 -50 | Fix quota bar math
+D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline
 ```
 
 Rendered example when quota lookup is unavailable:
 
 ```text
 gpt-5.4 (high) | [context bar] 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/? of ? p.req. | [quota calendar] 15/30
-D:\GITHUB\my-project | +100 -50 | Fix quota bar math
+D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline
 ```
 
 **Note:** bracketed labels such as `[context bar]` and `[quota calendar]` are readable stand-ins for the real Unicode/ANSI chart output used by the script.
@@ -107,6 +107,7 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math
 | **Path** | Current working folder | Uses `cwd`, then `workspace.current_dir`, then `Get-Location` |
 | **Lines changed** | Added and removed lines in this session | Green `+N`, bright red `-N` |
 | **Session name** | Copilot's human-readable session title | Rendered exactly as Copilot sends it |
+| **Repo name** | Git remote path from `origin` | Shows `owner/repo`; hidden when the folder is not a git repo or `origin` is missing |
 
 ### Line 3: optional
 
@@ -173,6 +174,7 @@ $Line2Layout = @(
     'path'
     'lines_changed'
     'session_name'
+    'repo_name'
 )
 
 $Line3Layout = @(
@@ -199,6 +201,7 @@ You can:
 | `quota` | 1 | Monthly quota pacing indicator |
 | `path` | 2 | Current working directory |
 | `session_name` | 2 | Copilot session name |
+| `repo_name` | 2 | Git remote owner/repo from `origin` |
 | `lines_changed` | 2 | Added and removed lines |
 
 If `premium_requests`, `premium_requests_month`, and `quota` are all removed from every layout, the script skips the quota API call entirely.
@@ -247,6 +250,7 @@ Notes:
 
 - Quota lookup is optional. The rest of the status line still works without it.
 - Quota-based segments can still render even when the session payload is minimal or empty, because they come from the live quota API.
+- `repo_name` is resolved locally with `git remote get-url origin`, using the workspace path from the current Copilot payload.
 - The script does **not** read Windows Credential Manager directly.
 - `gh auth token` is used as a fallback when available.
 

@@ -18,6 +18,7 @@ $DebugLog = $false
 # Line 2 segment names:
 #   path               - Current workspace / working directory
 #   session_name       - Human-readable Copilot session name
+#   repo_name          - Git remote owner/repo from origin
 #   lines_changed      - Lines added / removed this session (+N -N)
 #
 # Line 3 segment names:
@@ -36,6 +37,7 @@ $Line2Layout = @(
     'path'
     'lines_changed'
     'session_name'
+    'repo_name'
 )
 
 $Line3Layout = @(
@@ -48,7 +50,7 @@ $Line3Layout = @(
 #
 # LINE 1: model | context bar % size | in/out/cached tokens | duration | session/month-used of quota p.req. | quota pace
 #         (configurable — see $Line1Layout above)
-# LINE 2: cwd path | +lines -lines | session name
+# LINE 2: cwd path | +lines -lines | session name | repo name
 #         (configurable — see $Line2Layout above)
 # LINE 3: disabled by default
 #         (configurable — see $Line3Layout above)
@@ -288,6 +290,71 @@ function Get-WorkspaceDisplayPath($payload) {
     } else { $path = (Get-Location).Path }
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
     return ($path -replace '/', '\')
+}
+
+# Parses a git remote URL into host/owner/repo parts.
+# Supports SSH and URL forms such as:
+#   git@github.com:owner/repo.git
+#   https://github.com/owner/repo.git
+#   ssh://git@github.com/owner/repo.git
+function ConvertFrom-GitRemoteUrl([string]$remoteUrl) {
+    if ([string]::IsNullOrWhiteSpace($remoteUrl)) { return $null }
+    $trimmed = $remoteUrl.Trim()
+
+    $sshMatch = [regex]::Match($trimmed, '^(?:[^@]+@)?([^:]+):(.+?)(?:\.git)?/?$')
+    if (-not $trimmed.Contains('://') -and $sshMatch.Success) {
+        $pathSegments = $sshMatch.Groups[2].Value.Split('/', [System.StringSplitOptions]::RemoveEmptyEntries)
+        if ($pathSegments.Length -lt 2) { return $null }
+
+        $repo = $pathSegments[$pathSegments.Length - 1]
+        $owner = [string]::Join('/', $pathSegments[0..($pathSegments.Length - 2)])
+        if ([string]::IsNullOrWhiteSpace($owner) -or [string]::IsNullOrWhiteSpace($repo)) { return $null }
+
+        return [PSCustomObject]@{
+            Host      = $sshMatch.Groups[1].Value
+            Owner     = $owner
+            Repo      = $repo
+            OwnerRepo = "$owner/$repo"
+        }
+    }
+
+    $uri = $null
+    if (-not [System.Uri]::TryCreate($trimmed, [System.UriKind]::Absolute, [ref]$uri)) { return $null }
+    if ($uri.Scheme -notin @('http', 'https', 'ssh', 'git')) { return $null }
+
+    $cleanPath = $uri.AbsolutePath.Trim('/').TrimEnd('/')
+    if ($cleanPath.EndsWith('.git')) {
+        $cleanPath = $cleanPath.Substring(0, $cleanPath.Length - 4)
+    }
+
+    $segments = $cleanPath.Split('/', [System.StringSplitOptions]::RemoveEmptyEntries)
+    if ($segments.Length -lt 2) { return $null }
+
+    $repo = $segments[$segments.Length - 1]
+    $owner = [string]::Join('/', $segments[0..($segments.Length - 2)])
+    if ([string]::IsNullOrWhiteSpace($owner) -or [string]::IsNullOrWhiteSpace($repo)) { return $null }
+
+    return [PSCustomObject]@{
+        Host      = $uri.Host
+        Owner     = $owner
+        Repo      = $repo
+        OwnerRepo = "$owner/$repo"
+    }
+}
+
+# Returns git remote metadata for the current workspace by reading origin.
+# The status line hides git-derived segments when the directory is not a repo or origin is missing.
+function Get-GitOriginRemoteData($payload) {
+    $workspacePath = Get-WorkspaceDisplayPath $payload
+    if ([string]::IsNullOrWhiteSpace($workspacePath)) { return $null }
+
+    try {
+        $remoteUrl = (& git -C $workspacePath remote get-url origin 2>$null | Out-String).Trim()
+        if ([string]::IsNullOrWhiteSpace($remoteUrl)) { return $null }
+        return ConvertFrom-GitRemoteUrl $remoteUrl
+    } catch {}
+
+    return $null
 }
 
 # Returns the raw human-readable session name from session_name.
@@ -596,6 +663,13 @@ $quotaData = if (($allLayoutSegments -contains 'quota') -or
     $null
 }
 
+# ─── Fetch git remote data once (skipped if git-based segments are not in any layout) ──
+$gitRemoteData = if ($allLayoutSegments -contains 'repo_name') {
+    Get-GitOriginRemoteData $contextPayload
+} else {
+    $null
+}
+
 # ─── Segment resolver ────────────────────────────────────────────────────────
 # Returns the rendered string for a named segment, or $null if unavailable.
 function Resolve-Segment([string]$name) {
@@ -627,6 +701,10 @@ function Resolve-Segment([string]$name) {
         }
         'session_name' {
             return Get-SessionDisplayName $contextPayload
+        }
+        'repo_name' {
+            if ($gitRemoteData) { return $gitRemoteData.OwnerRepo }
+            return $null
         }
         'lines_changed' {
             return Get-LinesChangedStats $contextPayload
