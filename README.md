@@ -70,21 +70,21 @@ Typical layout using segment names:
 
 ```text
 Line 1: model | context_bar | tokens | duration | premium_requests | quota
-Line 2: path | lines_changed | session_name | repo_name | git_sync
+Line 2: path | lines_changed | session_name | repo_name git_sync
 ```
 
 Rendered example with quota data available:
 
 ```text
 gpt-5.4 (high) | [context bar] 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/342 of 1500 p.req. | [quota calendar] 3.2d behind (160 p.req.)
-D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline | 🟢
+D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline 🟢 synced
 ```
 
 Rendered example when quota lookup is unavailable:
 
 ```text
 gpt-5.4 (high) | [context bar] 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/? of ? p.req. | [quota calendar] 15/30
-D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline | 🟢
+D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline 🟢 synced
 ```
 
 **Note:** bracketed labels such as `[context bar]` and `[quota calendar]` are readable stand-ins for the real Unicode/ANSI chart output used by the script.
@@ -108,7 +108,7 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statu
 | **Lines changed** | Added and removed lines in this session | Green `+N`, bright red `-N` |
 | **Session name** | Copilot's human-readable session title | Rendered exactly as Copilot sends it |
 | **Repo name** | Git remote path from `origin` | Shows `owner/repo`; hidden when the folder is not a git repo or `origin` is missing |
-| **Git sync** | Whether the current branch matches its local tracking ref | `🟢` = synced, `⚪` = not synced; hidden outside git repos |
+| **Git sync** | Whether the current branch matches its local tracking ref | Rendered immediately after repo name with no pipe separator; green `🟢 synced`, dim grey `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, or `⚪ no upstream`; hidden outside git repos |
 
 ### Line 3: optional
 
@@ -204,7 +204,7 @@ You can:
 | `path` | 2 | Current working directory |
 | `session_name` | 2 | Copilot session name |
 | `repo_name` | 2 | Git remote owner/repo from `origin` |
-| `git_sync` | 2 | Local tracking-ref sync state (`🟢`, `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, `⚪ no upstream`) |
+| `git_sync` | 2 | Local tracking-ref sync state (`🟢 synced`, `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, `⚪ no upstream`) |
 | `lines_changed` | 2 | Added and removed lines |
 
 If `premium_requests`, `premium_requests_month`, and `quota` are all removed from every layout, the script skips the quota API call entirely.
@@ -219,6 +219,7 @@ If `premium_requests`, `premium_requests_month`, and `quota` are all removed fro
 | `cached` token value | Uses the default text color |
 | Quota pace | Green behind, white on pace, red ahead |
 | Lines changed | Added lines are green; removed lines are bright red |
+| Git sync | Green for `🟢 synced`; dim grey for `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, and `⚪ no upstream` |
 
 ## Local Testing
 
@@ -273,13 +274,13 @@ These are the low-cost git signals that fit the current "milliseconds, local-onl
 
 ### What `git_sync` means
 
-- `🟢` means the current branch matches its **local tracking ref**
+- `🟢 synced` means the current branch matches its **local tracking ref**
 - `⚪ ahead 2` means the branch is ahead of the local tracking ref by 2 commits
 - `⚪ behind 3` means the branch is behind the local tracking ref by 3 commits
 - `⚪ diverged 2/3` means the branch is both ahead and behind
 - `⚪ no upstream` means no tracking branch is configured
 
-**Important:** `🟢` does **not** mean "guaranteed current on GitHub right now." This script does not call `git fetch`, `git ls-remote`, or the GitHub API to check live remote state.
+**Important:** `🟢 synced` does **not** mean "guaranteed current on GitHub right now." This script does not call `git fetch`, `git ls-remote`, or the GitHub API to check live remote state.
 
 ## Debug Logging
 

@@ -488,35 +488,34 @@ function Get-TotalDurationDisplay($payload) {
 }
 
 # Builds the upstream sync segment from the local git snapshot.
-# Green circle means the local branch matches the local tracking ref.
-# Grey circle means the branch is not currently in the synced state.
+# Green means the local branch matches the local tracking ref.
+# Dim grey means the branch is not currently in the synced state.
 function Get-GitSyncSegment($gitSnapshot) {
     if ($null -eq $gitSnapshot -or -not $gitSnapshot.IsGitRepo) { return $null }
 
-    $greenCircle = "$green🟢$rst"
-    $greyCircle = "$dim⚪$rst"
+    $greenStatus = "$green🟢 synced$rst"
 
     if ([string]::IsNullOrWhiteSpace($gitSnapshot.Upstream)) {
-        return "$greyCircle no upstream"
+        return "$dim⚪ no upstream$rst"
     }
 
     $ahead = if ($null -ne $gitSnapshot.Ahead) { [int]$gitSnapshot.Ahead } else { 0 }
     $behind = if ($null -ne $gitSnapshot.Behind) { [int]$gitSnapshot.Behind } else { 0 }
 
     if ($ahead -eq 0 -and $behind -eq 0) {
-        return $greenCircle
+        return $greenStatus
     }
     if ($ahead -gt 0 -and $behind -gt 0) {
-        return "$greyCircle diverged $ahead/$behind"
+        return "$dim⚪ diverged $ahead/$behind$rst"
     }
     if ($ahead -gt 0) {
-        return "$greyCircle ahead $ahead"
+        return "$dim⚪ ahead $ahead$rst"
     }
     if ($behind -gt 0) {
-        return "$greyCircle behind $behind"
+        return "$dim⚪ behind $behind$rst"
     }
 
-    return "$greyCircle no upstream"
+    return "$dim⚪ no upstream$rst"
 }
 
 # Builds context usage segment for line 1: colored/grey bars + "23% 400K".
@@ -856,6 +855,19 @@ function Resolve-Segment([string]$name) {
 $line1Segments = $Line1Layout | ForEach-Object { Resolve-Segment $_ }
 $line2Segments = $Line2Layout | ForEach-Object { Resolve-Segment $_ }
 $line3Segments = $Line3Layout | ForEach-Object { Resolve-Segment $_ }
+
+$repoNameIndex = [array]::IndexOf($Line2Layout, 'repo_name')
+$gitSyncIndex = [array]::IndexOf($Line2Layout, 'git_sync')
+if ($repoNameIndex -ge 0 -and $gitSyncIndex -eq ($repoNameIndex + 1)) {
+    $repoSegment = if ($repoNameIndex -lt $line2Segments.Count) { $line2Segments[$repoNameIndex] } else { $null }
+    $syncSegment = if ($gitSyncIndex -lt $line2Segments.Count) { $line2Segments[$gitSyncIndex] } else { $null }
+
+    if (-not [string]::IsNullOrWhiteSpace([string]$repoSegment) -and
+        -not [string]::IsNullOrWhiteSpace([string]$syncSegment)) {
+        $line2Segments[$repoNameIndex] = "$repoSegment $syncSegment"
+        $line2Segments[$gitSyncIndex] = $null
+    }
+}
 
 Write-Output (Join-StatusSegments $line1Segments)
 Write-Output (Join-StatusSegments $line2Segments)
