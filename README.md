@@ -108,7 +108,7 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statu
 | **Lines changed** | Added and removed lines in this session | Green `+N`, bright red `-N` |
 | **Session name** | Copilot's human-readable session title | Rendered exactly as Copilot sends it |
 | **Repo name** | Git remote path from `origin` | Shows `owner/repo`; hidden when the folder is not a git repo or `origin` is missing |
-| **Git sync** | Whether the current branch matches its local tracking ref and whether the working tree is dirty | Rendered as its own segment using the same `|` separator as the rest of the line; a green `🟢` plus `synced` means fully synced and clean, while a dim `⚪` plus `synced dirty`, `ahead N`, `behind N`, `diverged A/B`, or `no upstream` means the repo is not in the fully synced/clean state. Status labels use the normal value text color so they match adjacent values such as `repo_name`. Hidden outside git repos. Tracking refs refresh in the background when stale, so the status line does not pause on network calls |
+| **Git sync** | Whether the current branch matches its local tracking ref and whether the working tree is dirty | Rendered as its own segment using the same `|` separator as the rest of the line; a green `🟢 synced` means fully synced and clean, while a dim `⚪` plus `synced dirty`, `ahead N`, `behind N`, `diverged A/B`, or `no upstream` means the repo is not in the fully synced/clean state. Status labels use the normal value text color so they match adjacent values such as `repo_name`, except for the fully synced/clean state where `synced` is also green. Hidden outside git repos. Tracking refs refresh in the background when stale, so the status line does not pause on network calls |
 
 ### Line 3: optional
 

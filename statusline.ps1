@@ -606,9 +606,9 @@ function Get-TotalDurationDisplay($payload) {
 }
 
 # Builds the upstream sync segment from the local git snapshot.
-# A green circle means the local branch matches the local tracking ref and the working tree is clean.
+# A green circle and "synced" label mean the local branch matches the local tracking ref and the working tree is clean.
 # A dim circle means the branch is not in the fully synced/clean state.
-# Status labels render in the default value color so they match adjacent text such as repo_name.
+# Status labels render in the default value color unless the repo is fully synced and clean.
 function Get-GitSyncSegment($gitSnapshot) {
     if ($null -eq $gitSnapshot -or -not $gitSnapshot.IsGitRepo) { return $null }
 
@@ -625,7 +625,7 @@ function Get-GitSyncSegment($gitSnapshot) {
     # Fully synced and clean: green
     if ($ahead -eq 0 -and $behind -eq 0) {
         if (-not $dirty) {
-            return "$green🟢$rst synced"
+            return "$green🟢 synced$rst"
         } else {
             # Synced but working tree has local edits: dim circle with default-color label.
             return "$dim⚪$rst synced dirty"
