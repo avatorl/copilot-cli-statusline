@@ -10,7 +10,7 @@ A customizable status line for [GitHub Copilot CLI](https://docs.github.com/en/c
 
 The script can render **up to three configurable lines**. By default, it uses the first two and leaves the third line empty, so nothing extra is printed.
 
-The first line is the "how is this session going?" line: it shows the active model, how full the context window is, how many input/output tokens have been spent, how long the session has been running, how many premium requests this session has used, and whether your monthly premium quota is currently running **behind pace** (good), **on pace**, or **ahead of budget** (bad).
+The first line is the "how is this session going?" line: it shows the active model, how full the context window is, how many input/output tokens have been spent, how long the session has been running, a compact premium-request summary in `session/month-used p.req.` format, and whether your monthly premium quota is currently running **behind pace** (good), **on pace**, or **ahead of budget** (bad).
 
 The second line is the "where am I and what changed?" line: it shows the current working directory, the session's cumulative added/removed lines, and the Copilot session name so you can keep your bearings while you work.
 
@@ -19,7 +19,7 @@ The third line is available for any extra segments you want, but it is **disable
 The default layout is:
 
 ```text
-gpt-5.4 (high) | [bar chart] 22% 400K | in 1.7M out 27K cached 350K | 54m | 5 p.req. | [chart - quota pace tracker] 3.2d behind (160 p.req.)
+gpt-5.4 (high) | [bar chart] 22% 400K | in 1.7M out 27K cached 350K | 54m | 5/340 p.req. | [chart - quota pace tracker] 3.2d behind (160 p.req.)
 D:\GITHUB\my-project | +695 -146 | Fix quota bar math
 ```
 
@@ -33,7 +33,8 @@ D:\GITHUB\my-project | +695 -146 | Fix quota bar math
 | **Context usage** | How full the current context window is | `context_window.used_percentage`, `context_window.context_window_size` | Renders a 10-cell bar, rounded percent, and compact size |
 | **Tokens** | How many input, output, and cached tokens the session has spent so far | `context_window.total_input_tokens`, `context_window.total_output_tokens`, `context_window.total_cache_read_tokens`, `context_window.total_cache_write_tokens` | Shows `in`, `out`, and `cached` totals; `cached` = read + write |
 | **Duration** | How long the session has been running | `cost.total_duration_ms` | Rounded to whole minutes; hidden under 30 seconds |
-| **Premium requests** | How many premium requests this session has used | `cost.total_premium_requests` | Rendered as `N p.req.` |
+| **Premium requests** | Session requests and monthly used requests in one compact segment | `cost.total_premium_requests` plus Copilot quota API `quota_snapshots.premium_interactions.percent_remaining`, `quota_snapshots.premium_interactions.entitlement` | Rendered as `session/month-used p.req.`; slash separators use the same dim color as the `in` and `out` labels |
+| **Monthly premium requests** | How many monthly premium requests have been used out of the total available | GitHub Copilot quota API: `quota_snapshots.premium_interactions.percent_remaining`, `quota_snapshots.premium_interactions.entitlement` | Rendered as `used of total`; falls back to `? of ?` when unavailable |
 | **Quota** | Whether monthly premium usage is behind pace, on pace, ahead, or exceeded | GitHub Copilot quota API: `quota_snapshots.premium_interactions.percent_remaining`, `quota_snapshots.premium_interactions.entitlement` | Uses a month-shaped calendar bar |
 
 ### Line 2 - Workspace Overview
@@ -84,13 +85,14 @@ Available segment names:
 | `context_bar` | 1 | Context-window usage bar, rounded percent, and size | `context_window.used_percentage`, `context_window.context_window_size` |
 | `tokens` | 1 | Cumulative input, output, and cached token totals | `context_window.total_input_tokens`, `context_window.total_output_tokens`, `context_window.total_cache_read_tokens` + `total_cache_write_tokens` |
 | `duration` | 1 | Session wall-clock time | `cost.total_duration_ms` |
-| `premium_requests` | 1 | Premium request count | `cost.total_premium_requests` |
+| `premium_requests` | 1 | Session/monthly used premium requests | `cost.total_premium_requests` plus Copilot quota API `percent_remaining`, `entitlement` |
+| `premium_requests_month` | 1 | Monthly premium requests used out of total available | Copilot quota API `percent_remaining`, `entitlement` |
 | `quota` | 1 | Monthly premium quota pacing indicator | Copilot quota API `percent_remaining`, `entitlement` |
 | `path` | 2 | Current workspace / working directory | `cwd`, fallback `workspace.current_dir` |
 | `session_name` | 2 | Human-readable Copilot session name | `session_name` |
 | `lines_changed` | 2 | Added and removed lines from the session payload | `cost.total_lines_added`, `cost.total_lines_removed` |
 
-If `quota` is removed from all layout arrays, the script skips the GitHub quota API call entirely.
+If `premium_requests`, `premium_requests_month`, and `quota` are all removed from the layout arrays, the script skips the GitHub quota API call entirely.
 
 ## Quota Calendar
 
@@ -134,6 +136,8 @@ The quota segment renders the current month as a compact calendar. The label is 
 Today is **white only when on pace**. When usage is behind or ahead, the today bar switches to the matching pace color and stays rendered as a dark shade `▓`. The green or red overlay appears only when the time-of-day-aware deviation rounds to at least **0.5 day** of spillover beyond today.
 
 When the Copilot quota API returns `entitlement`, the pace label also includes a premium request estimate such as `(160 p.req.)`. For **behind**, that number represents requests still available relative to calendar pace; for **ahead**, it represents how many premium requests are already over pace.
+
+The default premium-requests segment now combines the session count and monthly used count into a single value such as `5/340 p.req.`. If quota data is unavailable, the monthly part falls back to `?`, for example `5/? p.req.`. The optional standalone `premium_requests_month` segment still renders `used of total`, such as `340 of 1500`.
 
 If the quota API is unavailable, the script falls back to a dim `day/month` indicator after the quota calendar.
 

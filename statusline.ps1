@@ -11,7 +11,8 @@ $DebugLog = $false
 #   context_bar        - Context-window usage bar and percentage
 #   tokens             - Cumulative input / output token counts
 #   duration           - Total session wall-clock time
-#   premium_requests   - Premium request count (p.req.)
+#   premium_requests   - Session/month-used premium requests (p.req.)
+#   premium_requests_month - Monthly premium requests used of total
 #   quota              - Monthly quota pacing bar (fetches GitHub API)
 #
 # Line 2 segment names:
@@ -45,7 +46,7 @@ $Line3Layout = @(
 #
 # Renders up to three configurable status lines from Copilot's JSON payload piped to stdin.
 #
-# LINE 1: model | context bar % size | in/out/cached tokens | duration | p.req. | quota pace
+# LINE 1: model | context bar % size | in/out/cached tokens | duration | session/month-used p.req. | quota pace
 #         (configurable — see $Line1Layout above)
 # LINE 2: cwd path | +lines -lines | session name
 #         (configurable — see $Line2Layout above)
@@ -310,7 +311,7 @@ function Get-ModelDisplayName($payload) {
     return $null
 }
 
-# Returns formatted premium request count from cost.total_premium_requests.
+# Returns premium request count from cost.total_premium_requests.
 function Get-TotalPremiumRequests($payload) {
     if ($payload -and $payload.cost) {
         $requests = ConvertTo-NullableInt $payload.cost.total_premium_requests
@@ -421,7 +422,8 @@ function Get-GitHubAccessToken {
     return $null
 }
 
-# Queries the Copilot quota API; returns a PSCustomObject with UsedPct and Entitlement,
+# Queries the Copilot quota API; returns a PSCustomObject with UsedPct, UsedRequests,
+# and Entitlement,
 # or $null when the token is unavailable or the API call fails.
 function Get-CopilotQuotaData {
     $token = Get-GitHubAccessToken
@@ -436,15 +438,48 @@ function Get-CopilotQuotaData {
         # Guard: missing or non-numeric percent_remaining must not silently produce UsedPct=100.
         if ($null -eq $snap -or $null -eq $snap.percent_remaining) { return $null }
 
-        $usedPct     = [math]::Round(100 - [double]$snap.percent_remaining, 1)
+        $percentRemaining = [double]$snap.percent_remaining
+        $usedPct          = [math]::Round(100 - $percentRemaining, 1)
         $entitlement = if ($null -ne $snap.entitlement -and [double]$snap.entitlement -gt 0) {
             [int]$snap.entitlement
         } else { $null }
+        $usedRequests = if ($null -ne $entitlement) {
+            [int][math]::Round($entitlement * (100.0 - $percentRemaining) / 100.0, [System.MidpointRounding]::AwayFromZero)
+        } else { $null }
 
-        return [PSCustomObject]@{ UsedPct = $usedPct; Entitlement = $entitlement }
+        return [PSCustomObject]@{
+            UsedPct      = $usedPct
+            UsedRequests = $usedRequests
+            Entitlement  = $entitlement
+        }
     } catch {}
 
     return $null
+}
+
+# Builds the monthly premium requests segment: "123 of 1500".
+# Falls back to "? of ?" when quota data is unavailable or incomplete.
+function Get-MonthlyPremiumRequestsSegment($quotaData) {
+    if ($null -eq $quotaData -or $null -eq $quotaData.UsedRequests -or $null -eq $quotaData.Entitlement) {
+        return "? of ?"
+    }
+    return "$($quotaData.UsedRequests) of $($quotaData.Entitlement)"
+}
+
+# Builds the combined premium requests segment: "2/338 p.req.".
+# Slash separators use the same dim color as token labels such as "in" and "out".
+function Get-PremiumRequestsSegment($payload, $quotaData) {
+    $sessionRequests = Get-TotalPremiumRequests $payload
+    $monthUsed = if ($quotaData) { $quotaData.UsedRequests } else { $null }
+
+    if ($null -eq $sessionRequests -and $null -eq $monthUsed) {
+        return $null
+    }
+
+    $slash = "$dim/$rst"
+    $sessionText = if ($null -ne $sessionRequests) { "$sessionRequests" } else { "?" }
+    $monthUsedText = if ($null -ne $monthUsed) { "$monthUsed" } else { "?" }
+    return "$sessionText$slash$monthUsedText p.req."
 }
 
 # Builds the quota pace segment using a month-length calendar overlay.
@@ -458,7 +493,7 @@ function Get-CopilotQuotaData {
 # "Spillover" is the deviation that extends beyond today into past/future bar slots.
 #
 # Parameters:
-#   $quotaData — [PSCustomObject]@{ UsedPct; Entitlement } or $null (API unavailable)
+#   $quotaData — [PSCustomObject]@{ UsedPct; UsedRequests; Entitlement } or $null (API unavailable)
 function Get-QuotaPaceSegment($quotaData) {
     $now         = Get-Date
     $daysInMonth = [DateTime]::DaysInMonth($now.Year, $now.Month)
@@ -542,9 +577,15 @@ $rawStdin = Get-OptionalStdin
 Write-StdinLog $rawStdin
 $contextPayload = ConvertFrom-JsonObjectOrNull $rawStdin
 
-# ─── Fetch quota data once (skipped if 'quota' is not in any layout) ─────────
+# ─── Fetch quota data once (skipped if quota-based segments are not in any layout) ─
 $allLayoutSegments = $Line1Layout + $Line2Layout + $Line3Layout
-$quotaData = if ($allLayoutSegments -contains 'quota') { Get-CopilotQuotaData } else { $null }
+$quotaData = if (($allLayoutSegments -contains 'quota') -or
+    ($allLayoutSegments -contains 'premium_requests') -or
+    ($allLayoutSegments -contains 'premium_requests_month')) {
+    Get-CopilotQuotaData
+} else {
+    $null
+}
 
 # ─── Segment resolver ────────────────────────────────────────────────────────
 # Returns the rendered string for a named segment, or $null if unavailable.
@@ -564,8 +605,10 @@ function Resolve-Segment([string]$name) {
             return Get-TotalDurationDisplay $contextPayload
         }
         'premium_requests' {
-            $n = Get-TotalPremiumRequests $contextPayload
-            if ($null -ne $n) { return "$n p.req." } else { return $null }
+            return Get-PremiumRequestsSegment $contextPayload $quotaData
+        }
+        'premium_requests_month' {
+            return Get-MonthlyPremiumRequestsSegment $quotaData
         }
         'quota' {
             return Get-QuotaPaceSegment $quotaData
