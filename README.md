@@ -66,14 +66,28 @@ Start a new Copilot CLI session. The status line should appear automatically.
 
 The script can render up to **three configurable lines**. By default it uses the first two and leaves the third line empty.
 
-Typical layout:
+Typical layout using segment names:
+
+```text
+Line 1: model | context_bar | tokens | duration | premium_requests | quota
+Line 2: path | lines_changed | session_name
+```
+
+Rendered example with quota data available:
 
 ```text
 gpt-5.4 (high) | ██░░░░░░░░ 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/<month-used> of <quota> p.req. | <quota calendar> <pace label>
 D:\GITHUB\my-project | +100 -50 | Fix quota bar math
 ```
 
-**Important:** the quota-related parts of that example are placeholders for live account values, so your monthly used count, pace, and hint will change over time.
+Rendered example when quota lookup is unavailable:
+
+```text
+gpt-5.4 (high) | ██░░░░░░░░ 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/? of ? p.req. | <quota calendar> 15/30
+D:\GITHUB\my-project | +100 -50 | Fix quota bar math
+```
+
+**Important:** the quota-related parts of those examples are placeholders for live account values, so your monthly used count, pace, and hint will change over time.
 
 ### Line 1: session overview
 
