@@ -606,36 +606,43 @@ function Get-TotalDurationDisplay($payload) {
 }
 
 # Builds the upstream sync segment from the local git snapshot.
-# Green means the local branch matches the local tracking ref.
-# Dim grey means the branch is not currently in the synced state.
-# A dim-grey "dirty" suffix means the working tree has staged, unstaged, or untracked changes.
+# A green circle means the local branch matches the local tracking ref and the working tree is clean.
+# A dim circle means the branch is not in the fully synced/clean state.
+# Status labels render in the default value color so they match adjacent text such as repo_name.
 function Get-GitSyncSegment($gitSnapshot) {
     if ($null -eq $gitSnapshot -or -not $gitSnapshot.IsGitRepo) { return $null }
 
-    $dirtyDimSuffix = if ($gitSnapshot.IsDirty) { "$dim dirty$rst" } else { $null }
-    $dirtyTextSuffix = if ($gitSnapshot.IsDirty) { ' dirty' } else { '' }
+    $dirty = $gitSnapshot.IsDirty
+    $dirtyTextSuffix = if ($dirty) { ' dirty' } else { '' }
 
     if ([string]::IsNullOrWhiteSpace($gitSnapshot.Upstream)) {
-        return "$dim⚪ no upstream$dirtyTextSuffix$rst"
+        return "$dim⚪$rst no upstream$dirtyTextSuffix"
     }
 
     $ahead = if ($null -ne $gitSnapshot.Ahead) { [int]$gitSnapshot.Ahead } else { 0 }
     $behind = if ($null -ne $gitSnapshot.Behind) { [int]$gitSnapshot.Behind } else { 0 }
 
+    # Fully synced and clean: green
     if ($ahead -eq 0 -and $behind -eq 0) {
-        return "$green🟢 synced$rst$dirtyDimSuffix"
-    }
-    if ($ahead -gt 0 -and $behind -gt 0) {
-        return "$dim⚪ diverged $ahead/$behind$dirtyTextSuffix$rst"
-    }
-    if ($ahead -gt 0) {
-        return "$dim⚪ ahead $ahead$dirtyTextSuffix$rst"
-    }
-    if ($behind -gt 0) {
-        return "$dim⚪ behind $behind$dirtyTextSuffix$rst"
+        if (-not $dirty) {
+            return "$green🟢$rst synced"
+        } else {
+            # Synced but working tree has local edits: dim circle with default-color label.
+            return "$dim⚪$rst synced dirty"
+        }
     }
 
-    return "$dim⚪ no upstream$dirtyTextSuffix$rst"
+    if ($ahead -gt 0 -and $behind -gt 0) {
+        return "$dim⚪$rst diverged $ahead/$behind$dirtyTextSuffix"
+    }
+    if ($ahead -gt 0) {
+        return "$dim⚪$rst ahead $ahead$dirtyTextSuffix"
+    }
+    if ($behind -gt 0) {
+        return "$dim⚪$rst behind $behind$dirtyTextSuffix"
+    }
+
+    return "$dim⚪$rst no upstream$dirtyTextSuffix"
 }
 
 # Builds context usage segment for line 1: colored/grey bars + "23% 400K".

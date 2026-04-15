@@ -108,7 +108,7 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statu
 | **Lines changed** | Added and removed lines in this session | Green `+N`, bright red `-N` |
 | **Session name** | Copilot's human-readable session title | Rendered exactly as Copilot sends it |
 | **Repo name** | Git remote path from `origin` | Shows `owner/repo`; hidden when the folder is not a git repo or `origin` is missing |
-| **Git sync** | Whether the current branch matches its local tracking ref and whether the working tree is dirty | Rendered immediately after repo name with no pipe separator; green `🟢 synced`, dim grey `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, or `⚪ no upstream`, with `dirty` appended when local edits, staged changes, or untracked files exist; hidden outside git repos. Tracking refs refresh in the background when stale, so the status line does not pause on network calls |
+| **Git sync** | Whether the current branch matches its local tracking ref and whether the working tree is dirty | Rendered immediately after repo name with no pipe separator; a green `🟢` plus `synced` means fully synced and clean, while a dim `⚪` plus `synced dirty`, `ahead N`, `behind N`, `diverged A/B`, or `no upstream` means the repo is not in the fully synced/clean state. Status labels use the normal value text color so they match adjacent values such as `repo_name`. Hidden outside git repos. Tracking refs refresh in the background when stale, so the status line does not pause on network calls |
 
 ### Line 3: optional
 
@@ -214,7 +214,7 @@ You can:
 | `path` | 2 | Current working directory |
 | `session_name` | 2 | Copilot session name |
 | `repo_name` | 2 | Git remote owner/repo from `origin` |
-| `git_sync` | 2 | Local tracking-ref sync state with optional dirty suffix (`🟢 synced`, `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, `⚪ no upstream`, each optionally ending in `dirty`) |
+| `git_sync` | 2 | Local tracking-ref sync state (`🟢 synced`, `⚪ synced dirty`, `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, `⚪ no upstream`; non-green states can also end in `dirty`) |
 | `lines_changed` | 2 | Added and removed lines |
 
 If `premium_requests`, `premium_requests_month`, and `quota` are all removed from every layout, the script skips the quota API call entirely.
@@ -229,7 +229,7 @@ If `premium_requests`, `premium_requests_month`, and `quota` are all removed fro
 | `cached` token value | Uses the default text color |
 | Quota pace | Green behind, white on pace, red ahead |
 | Lines changed | Added lines are green; removed lines are bright red |
-| Git sync | Green for `🟢 synced`; dim grey for `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, `⚪ no upstream`, and the `dirty` suffix |
+| Git sync | Green circle for fully synced + clean; dim circle for all other git-sync states; status text uses the default value color |
 
 ## Local Testing
 
@@ -270,23 +270,20 @@ Notes:
 - The script does **not** read Windows Credential Manager directly.
 - `gh auth token` is used as a fallback when available.
 
-## Fast Git-Backed Ideas
+## Git Features Implemented
 
-These are the low-cost git signals that fit the current fast-refresh goal:
+The script currently implements these git-backed features:
 
-| Idea | Best local git source | Why it is fast |
-|------|------------------------|----------------|
-| `repo_name` | `git remote get-url origin` | Single local config lookup |
-| `git_sync` | Background `git fetch --quiet --no-tags --prune` + `git status --porcelain=2 --branch` | Uses local status immediately and refreshes tracking refs asynchronously when stale |
-| `git_branch` | `git status --porcelain=2 --branch` | Same snapshot as `git_sync` |
-| `git_dirty` | `git status --porcelain=2 --branch` | Same snapshot as `git_sync`; can detect staged/unstaged/untracked state |
-| `git_sha` | `git rev-parse --short HEAD` | Cheap local ref lookup |
-| `git_root` | `git rev-parse --show-toplevel` | Cheap local repo-root lookup |
+| Feature | How it works |
+|---------|--------------|
+| `repo_name` | Uses `git remote get-url origin` and displays `owner/repo` when `origin` is available |
+| `git_sync` | Uses `git status --porcelain=2 --branch` to detect upstream sync state and working-tree dirtiness |
+| Background tracking-ref refresh | Starts a detached `git fetch --quiet --no-tags --prune` only when cached tracking refs are stale, so rendering stays immediate |
 
 ### What `git_sync` means
 
-- `🟢 synced` means the current branch matches its **local tracking ref**
-- `🟢 synced dirty` means the branch matches its local tracking ref, but the working tree has local edits, staged changes, or untracked files
+- `🟢 synced` means the current branch matches its **local tracking ref** and the working tree is clean (green circle, normal label text)
+- `⚪ synced dirty` means the branch matches its local tracking ref, but the working tree has local edits, staged changes, or untracked files (dim circle, normal label text)
 - `⚪ ahead 2` means the branch is ahead of the local tracking ref by 2 commits
 - `⚪ behind 3` means the branch is behind the local tracking ref by 3 commits
 - `⚪ diverged 2/3` means the branch is both ahead and behind
