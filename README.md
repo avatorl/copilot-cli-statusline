@@ -26,7 +26,7 @@ git clone https://github.com/avatorl/copilot-cli-statusline.git
 You only need these two files at runtime:
 
 ```text
-C:\Users\<you>\.copilot\statusline\
+C:\Users\alex\.copilot\statusline\
 ├── statusline.ps1
 └── statusline.cmd
 ```
@@ -51,7 +51,7 @@ Edit `~/.copilot/config.json`:
   "experimental_flags": ["STATUS_LINE"],
   "statusLine": {
     "type": "command",
-    "command": "C:\\Users\\<you>\\.copilot\\statusline\\statusline.cmd"
+    "command": "C:\\Users\\alex\\.copilot\\statusline\\statusline.cmd"
   }
 }
 ```
@@ -76,14 +76,14 @@ Line 2: path | lines_changed | session_name
 Rendered example with quota data available:
 
 ```text
-gpt-5.4 (high) | ██░░░░░░░░ 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/<month-used> of <quota> p.req. | <quota calendar> <pace label>
+gpt-5.4 (high) | [context bar] 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/342 of 1500 p.req. | [quota calendar] 3.2d behind (160 p.req.)
 D:\GITHUB\my-project | +100 -50 | Fix quota bar math
 ```
 
 Rendered example when quota lookup is unavailable:
 
 ```text
-gpt-5.4 (high) | ██░░░░░░░░ 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/? of ? p.req. | <quota calendar> 15/30
+gpt-5.4 (high) | [context bar] 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/? of ? p.req. | [quota calendar] 15/30
 D:\GITHUB\my-project | +100 -50 | Fix quota bar math
 ```
 
