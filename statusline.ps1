@@ -11,7 +11,7 @@ $DebugLog = $false
 #   context_bar        - Context-window usage bar and percentage
 #   tokens             - Cumulative input / output token counts
 #   duration           - Total session wall-clock time
-#   premium_requests   - Session/month-used premium requests (p.req.)
+#   premium_requests   - Session/month-used of quota premium requests (p.req.)
 #   premium_requests_month - Monthly premium requests used of total
 #   quota              - Monthly quota pacing bar (fetches GitHub API)
 #
@@ -46,7 +46,7 @@ $Line3Layout = @(
 #
 # Renders up to three configurable status lines from Copilot's JSON payload piped to stdin.
 #
-# LINE 1: model | context bar % size | in/out/cached tokens | duration | session/month-used p.req. | quota pace
+# LINE 1: model | context bar % size | in/out/cached tokens | duration | session/month-used of quota p.req. | quota pace
 #         (configurable — see $Line1Layout above)
 # LINE 2: cwd path | +lines -lines | session name
 #         (configurable — see $Line2Layout above)
@@ -476,22 +476,25 @@ function Get-PremiumRequestPaceHint($daysDelta, $entitlement, $daysInMonth) {
     return " ($pReq p.req.)"
 }
 
-# Builds the combined premium requests segment: "2/338 p.req.".
+# Builds the combined premium requests segment: "2/338 of 1500 p.req.".
 # Left side = this session's premium requests from Copilot CLI payload.
-# Right side = account-wide monthly used premium requests from the live quota API.
+# Middle = account-wide monthly used premium requests from the live quota API.
+# "of" value = monthly premium request budget from the live quota API.
 # Slash separators use the same dim color as token labels such as "in" and "out".
 function Get-PremiumRequestsSegment($payload, $quotaData) {
     $sessionRequests = Get-TotalPremiumRequests $payload
     $monthUsed = if ($quotaData) { $quotaData.UsedRequests } else { $null }
+    $entitlement = if ($quotaData) { $quotaData.Entitlement } else { $null }
 
-    if ($null -eq $sessionRequests -and $null -eq $monthUsed) {
+    if ($null -eq $sessionRequests -and $null -eq $monthUsed -and $null -eq $entitlement) {
         return $null
     }
 
     $slash = "$dim/$rst"
     $sessionText = if ($null -ne $sessionRequests) { "$sessionRequests" } else { "?" }
     $monthUsedText = if ($null -ne $monthUsed) { "$monthUsed" } else { "?" }
-    return "$sessionText$slash$monthUsedText p.req."
+    $entitlementText = if ($null -ne $entitlement) { "$entitlement" } else { "?" }
+    return "$sessionText$slash$monthUsedText of $entitlementText p.req."
 }
 
 # Builds the quota pace segment using a month-length calendar overlay.

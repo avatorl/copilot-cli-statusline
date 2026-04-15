@@ -69,7 +69,7 @@ The script can render up to **three configurable lines**. By default it uses the
 Typical layout:
 
 ```text
-gpt-5.4 (high) | ██░░░░░░░░ 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/<month-used> p.req. | <quota calendar> <pace label>
+gpt-5.4 (high) | ██░░░░░░░░ 22% 400K | in 1.7M out 27K cached 97K | 54m | 5/<month-used> of <quota> p.req. | <quota calendar> <pace label>
 D:\GITHUB\my-project | +100 -50 | Fix quota bar math
 ```
 
@@ -83,7 +83,7 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math
 | **Context usage** | How full the current context window is | Shows a 10-cell bar, rounded percent, and window size |
 | **Tokens** | Total input, output, and cached tokens so far | `cached` = cache reads + cache writes |
 | **Duration** | How long the session has been running | Hidden under 30 seconds |
-| **Premium requests** | `session/month-used p.req.` | Left number = this session, right number = this month |
+| **Premium requests** | `session/month-used of quota p.req.` | Session count, monthly used count, and monthly quota in one compact segment |
 | **Quota pace** | Whether you are under, on, or over monthly quota pace | Uses a compact month-shaped calendar |
 
 ### Line 2: workspace overview
@@ -102,17 +102,18 @@ Line 3 is empty by default. You can move any supported segment there if you want
 
 The premium request display is the easiest part to misread:
 
-- `5/342 p.req.` means **5 premium requests in this session** and **342 premium requests used this month**
+- `5/342 of 1500 p.req.` means **5 premium requests in this session**, **342 used this month**, and **1500 available for the month**
 - The **left** number comes from the Copilot CLI session payload: `cost.total_premium_requests`
-- The **right** number comes from the live GitHub Copilot quota API, not from the session payload
+- The **middle** number comes from the live GitHub Copilot quota API and shows monthly used requests
+- The **`of`** number comes from the same quota API and shows the monthly entitlement
 
-That means the two numbers can move independently.
+That means the session count and monthly values can move independently.
 
 Examples:
 
-- `5/342 p.req.` — session count and monthly count are both available
-- `5/? p.req.` — session count is available, monthly quota lookup failed
-- `?/342 p.req.` — session payload does not include the session count yet, but monthly quota lookup succeeded
+- `5/342 of 1500 p.req.` — all values are available
+- `5/? of ? p.req.` — session count is available, monthly quota lookup failed
+- `?/342 of 1500 p.req.` — session payload does not include the session count yet, but quota lookup succeeded
 
 ## Understanding the Quota Pace Bar
 
@@ -179,7 +180,7 @@ You can:
 | `context_bar` | 1 | Context usage bar, percent, and size |
 | `tokens` | 1 | Input, output, and cached token totals |
 | `duration` | 1 | Session wall-clock time |
-| `premium_requests` | 1 | Session/month-used premium requests |
+| `premium_requests` | 1 | Session/month-used of quota premium requests |
 | `premium_requests_month` | 1 | Monthly premium requests used out of total |
 | `quota` | 1 | Monthly quota pacing indicator |
 | `path` | 2 | Current working directory |
