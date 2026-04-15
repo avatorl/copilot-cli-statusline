@@ -1,6 +1,6 @@
 # Copilot CLI Status Line
 
-A Windows PowerShell status line for [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli). It keeps the most useful session details visible in the terminal: model, context usage, token totals, session duration, premium requests, quota pace, current folder, session name, and lines changed.
+A Windows PowerShell status line for [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli). It keeps the most useful session details visible in the terminal: model, context usage, token totals, session duration, premium requests, quota pace, current folder, session name, git repo/sync status, and lines changed.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 ![PowerShell 7+](https://img.shields.io/badge/PowerShell-7%2B-5391FE)
@@ -108,7 +108,7 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statu
 | **Lines changed** | Added and removed lines in this session | Green `+N`, bright red `-N` |
 | **Session name** | Copilot's human-readable session title | Rendered exactly as Copilot sends it |
 | **Repo name** | Git remote path from `origin` | Shows `owner/repo`; hidden when the folder is not a git repo or `origin` is missing |
-| **Git sync** | Whether the current branch matches its local tracking ref | Rendered immediately after repo name with no pipe separator; green `🟢 synced`, dim grey `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, or `⚪ no upstream`; hidden outside git repos |
+| **Git sync** | Whether the current branch matches its local tracking ref and whether the working tree is dirty | Rendered immediately after repo name with no pipe separator; green `🟢 synced`, dim grey `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, or `⚪ no upstream`, with `dirty` appended when local edits, staged changes, or untracked files exist; hidden outside git repos |
 
 ### Line 3: optional
 
@@ -204,7 +204,7 @@ You can:
 | `path` | 2 | Current working directory |
 | `session_name` | 2 | Copilot session name |
 | `repo_name` | 2 | Git remote owner/repo from `origin` |
-| `git_sync` | 2 | Local tracking-ref sync state (`🟢 synced`, `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, `⚪ no upstream`) |
+| `git_sync` | 2 | Local tracking-ref sync state with optional dirty suffix (`🟢 synced`, `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, `⚪ no upstream`, each optionally ending in `dirty`) |
 | `lines_changed` | 2 | Added and removed lines |
 
 If `premium_requests`, `premium_requests_month`, and `quota` are all removed from every layout, the script skips the quota API call entirely.
@@ -219,7 +219,7 @@ If `premium_requests`, `premium_requests_month`, and `quota` are all removed fro
 | `cached` token value | Uses the default text color |
 | Quota pace | Green behind, white on pace, red ahead |
 | Lines changed | Added lines are green; removed lines are bright red |
-| Git sync | Green for `🟢 synced`; dim grey for `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, and `⚪ no upstream` |
+| Git sync | Green for `🟢 synced`; dim grey for `⚪ ahead N`, `⚪ behind N`, `⚪ diverged A/B`, `⚪ no upstream`, and the `dirty` suffix |
 
 ## Local Testing
 
@@ -255,18 +255,19 @@ Notes:
 - Quota lookup is optional. The rest of the status line still works without it.
 - Quota-based segments can still render even when the session payload is minimal or empty, because they come from the live quota API.
 - `repo_name` is resolved locally with `git remote get-url origin`, using the workspace path from the current Copilot payload.
-- `git_sync` is resolved locally with `git status --porcelain=2 --branch`, using the workspace path from the current Copilot payload.
+- `git_sync` is resolved with `git status --porcelain=2 --branch`, using the workspace path from the current Copilot payload.
+- When `git_sync` is enabled and the payload includes `session_id` or `transcript_path`, the script runs `git fetch --quiet` once per Copilot session/workspace before later refreshes fall back to local-only status checks.
 - The script does **not** read Windows Credential Manager directly.
 - `gh auth token` is used as a fallback when available.
 
 ## Fast Git-Backed Ideas
 
-These are the low-cost git signals that fit the current "milliseconds, local-only" goal:
+These are the low-cost git signals that fit the current fast-refresh goal:
 
 | Idea | Best local git source | Why it is fast |
 |------|------------------------|----------------|
 | `repo_name` | `git remote get-url origin` | Single local config lookup |
-| `git_sync` | `git status --porcelain=2 --branch` | Branch, upstream, and ahead/behind in one command |
+| `git_sync` | `git fetch --quiet` once per session, then `git status --porcelain=2 --branch` | Refreshes tracking refs once, then uses one cheap local status command per refresh |
 | `git_branch` | `git status --porcelain=2 --branch` | Same snapshot as `git_sync` |
 | `git_dirty` | `git status --porcelain=2 --branch` | Same snapshot as `git_sync`; can detect staged/unstaged/untracked state |
 | `git_sha` | `git rev-parse --short HEAD` | Cheap local ref lookup |
@@ -275,12 +276,14 @@ These are the low-cost git signals that fit the current "milliseconds, local-onl
 ### What `git_sync` means
 
 - `🟢 synced` means the current branch matches its **local tracking ref**
+- `🟢 synced dirty` means the branch matches its local tracking ref, but the working tree has local edits, staged changes, or untracked files
 - `⚪ ahead 2` means the branch is ahead of the local tracking ref by 2 commits
 - `⚪ behind 3` means the branch is behind the local tracking ref by 3 commits
 - `⚪ diverged 2/3` means the branch is both ahead and behind
 - `⚪ no upstream` means no tracking branch is configured
+- Any non-green state can also end in `dirty` when the working tree is not clean
 
-**Important:** `🟢 synced` does **not** mean "guaranteed current on GitHub right now." This script does not call `git fetch`, `git ls-remote`, or the GitHub API to check live remote state.
+**Important:** `🟢 synced` still does **not** mean "guaranteed current on GitHub right now." The script refreshes tracking refs with one `git fetch --quiet` per Copilot session/workspace, not on every status-line refresh, and it does not call `git ls-remote` or the GitHub API.
 
 ## Debug Logging
 
@@ -309,9 +312,9 @@ Copilot CLI sends a JSON payload to stdin on each refresh. Two payload shapes ar
 | Field | Type | Used now | Meaning |
 |-------|------|----------|---------|
 | `cwd` | `string` | ✅ | Current working directory |
-| `session_id` | `string` | ○ | Unique session identifier |
+| `session_id` | `string` | ✅ | Unique session identifier |
 | `session_name` | `string` | ✅ | Human-readable session name |
-| `transcript_path` | `string` | ○ | Path to the session transcript folder |
+| `transcript_path` | `string` | ✅ | Path to the session transcript folder |
 | `version` | `string` | ○ | Copilot CLI version |
 
 ### `model`

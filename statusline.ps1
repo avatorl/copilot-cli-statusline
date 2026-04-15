@@ -19,7 +19,7 @@ $DebugLog = $false
 #   path               - Current workspace / working directory
 #   session_name       - Human-readable Copilot session name
 #   repo_name          - Git remote owner/repo from origin
-#   git_sync           - Upstream sync status from local git metadata
+#   git_sync           - Upstream sync / dirty status from git metadata
 #   lines_changed      - Lines added / removed this session (+N -N)
 #
 # Line 3 segment names:
@@ -52,7 +52,7 @@ $Line3Layout = @(
 #
 # LINE 1: model | context bar % size | in/out/cached tokens | duration | session/month-used of quota p.req. | quota pace
 #         (configurable — see $Line1Layout above)
-# LINE 2: cwd path | +lines -lines | session name | repo name
+# LINE 2: cwd path | +lines -lines | session name | repo name + git sync
 #         (configurable — see $Line2Layout above)
 # LINE 3: disabled by default
 #         (configurable — see $Line3Layout above)
@@ -294,6 +294,99 @@ function Get-WorkspaceDisplayPath($payload) {
     return ($path -replace '/', '\')
 }
 
+# Returns a stable Copilot session key for session-scoped caches.
+function Get-CopilotSessionKey($payload) {
+    if ($payload) {
+        if ($payload.session_id) {
+            $sessionId = [string]$payload.session_id
+            if (-not [string]::IsNullOrWhiteSpace($sessionId)) { return $sessionId.Trim() }
+        }
+        if ($payload.transcript_path) {
+            $transcriptPath = [string]$payload.transcript_path
+            if (-not [string]::IsNullOrWhiteSpace($transcriptPath)) { return $transcriptPath.Trim() }
+        }
+    }
+    return $null
+}
+
+# Returns the local cache root used for small statusline state files.
+function Get-StatuslineStateRoot() {
+    $basePath = $env:LOCALAPPDATA
+    if ([string]::IsNullOrWhiteSpace($basePath)) {
+        $basePath = [System.IO.Path]::GetTempPath().TrimEnd('\')
+    }
+    return Join-Path $basePath 'copilot-cli-statusline'
+}
+
+# Returns a lowercase SHA-256 hex string for cache-key-safe filenames.
+function Get-Sha256Hex([string]$text) {
+    if ([string]::IsNullOrEmpty($text)) { return $null }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
+    $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)
+    return ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+}
+
+# Returns the marker-file path used to remember a one-time fetch per session/workspace.
+function Get-GitFetchMarkerPath($payload) {
+    $sessionKey = Get-CopilotSessionKey $payload
+    $workspacePath = Get-WorkspaceDisplayPath $payload
+    if ([string]::IsNullOrWhiteSpace($sessionKey) -or [string]::IsNullOrWhiteSpace($workspacePath)) { return $null }
+
+    $cacheKey = Get-Sha256Hex "$sessionKey`n$($workspacePath.ToLowerInvariant())"
+    if ([string]::IsNullOrWhiteSpace($cacheKey)) { return $null }
+
+    return Join-Path (Join-Path (Get-StatuslineStateRoot) 'git-fetch') "$cacheKey.marker"
+}
+
+# Returns $true when the workspace path is inside a git work tree.
+function Test-IsGitRepository([string]$workspacePath) {
+    if ([string]::IsNullOrWhiteSpace($workspacePath)) { return $false }
+
+    try {
+        $result = (& git -C $workspacePath rev-parse --is-inside-work-tree 2>$null | Out-String).Trim()
+        return ($result -eq 'true')
+    } catch {
+        return $false
+    }
+}
+
+# Refreshes remote-tracking refs once per Copilot session/workspace when git_sync is enabled.
+function Invoke-GitFetchOncePerSession($payload) {
+    $workspacePath = Get-WorkspaceDisplayPath $payload
+    $markerPath = Get-GitFetchMarkerPath $payload
+    if ([string]::IsNullOrWhiteSpace($workspacePath) -or [string]::IsNullOrWhiteSpace($markerPath)) { return }
+    if (-not (Test-IsGitRepository $workspacePath)) { return }
+    if (Test-Path -LiteralPath $markerPath) { return }
+
+    $markerDirectory = Split-Path -Parent $markerPath
+    if ([string]::IsNullOrWhiteSpace($markerDirectory)) { return }
+
+    try {
+        if (-not (Test-Path -LiteralPath $markerDirectory)) {
+            New-Item -ItemType Directory -Path $markerDirectory -Force | Out-Null
+        }
+    } catch {
+        return
+    }
+
+    $timestamp = (Get-Date).ToString('o')
+    $statusLine = 'fetch attempted'
+    try {
+        & git -C $workspacePath fetch --quiet 2>$null | Out-Null
+        $statusLine = 'fetch completed'
+    } catch {
+        $statusLine = 'fetch failed'
+    }
+
+    try {
+        Set-Content -Path $markerPath -Value @(
+            "workspace=$workspacePath"
+            "time=$timestamp"
+            "status=$statusLine"
+        ) -Encoding utf8
+    } catch {}
+}
+
 # Parses a git remote URL into host/owner/repo parts.
 # Supports SSH and URL forms such as:
 #   git@github.com:owner/repo.git
@@ -361,7 +454,7 @@ function Get-GitOriginRemoteData($payload) {
 
 # Builds a shared local git snapshot from one cheap status command.
 # This is the preferred source for fast git-backed segments such as sync state because it
-# provides branch, upstream, ahead/behind, and dirty-state information without any network call.
+# provides branch, upstream, ahead/behind, and dirty-state information from one local call.
 function Get-GitStatusSnapshot($payload) {
     $workspacePath = Get-WorkspaceDisplayPath $payload
     if ([string]::IsNullOrWhiteSpace($workspacePath)) { return $null }
@@ -490,32 +583,34 @@ function Get-TotalDurationDisplay($payload) {
 # Builds the upstream sync segment from the local git snapshot.
 # Green means the local branch matches the local tracking ref.
 # Dim grey means the branch is not currently in the synced state.
+# A dim-grey "dirty" suffix means the working tree has staged, unstaged, or untracked changes.
 function Get-GitSyncSegment($gitSnapshot) {
     if ($null -eq $gitSnapshot -or -not $gitSnapshot.IsGitRepo) { return $null }
 
-    $greenStatus = "$green🟢 synced$rst"
+    $dirtyDimSuffix = if ($gitSnapshot.IsDirty) { "$dim dirty$rst" } else { $null }
+    $dirtyTextSuffix = if ($gitSnapshot.IsDirty) { ' dirty' } else { '' }
 
     if ([string]::IsNullOrWhiteSpace($gitSnapshot.Upstream)) {
-        return "$dim⚪ no upstream$rst"
+        return "$dim⚪ no upstream$dirtyTextSuffix$rst"
     }
 
     $ahead = if ($null -ne $gitSnapshot.Ahead) { [int]$gitSnapshot.Ahead } else { 0 }
     $behind = if ($null -ne $gitSnapshot.Behind) { [int]$gitSnapshot.Behind } else { 0 }
 
     if ($ahead -eq 0 -and $behind -eq 0) {
-        return $greenStatus
+        return "$green🟢 synced$rst$dirtyDimSuffix"
     }
     if ($ahead -gt 0 -and $behind -gt 0) {
-        return "$dim⚪ diverged $ahead/$behind$rst"
+        return "$dim⚪ diverged $ahead/$behind$dirtyTextSuffix$rst"
     }
     if ($ahead -gt 0) {
-        return "$dim⚪ ahead $ahead$rst"
+        return "$dim⚪ ahead $ahead$dirtyTextSuffix$rst"
     }
     if ($behind -gt 0) {
-        return "$dim⚪ behind $behind$rst"
+        return "$dim⚪ behind $behind$dirtyTextSuffix$rst"
     }
 
-    return "$dim⚪ no upstream$rst"
+    return "$dim⚪ no upstream$dirtyTextSuffix$rst"
 }
 
 # Builds context usage segment for line 1: colored/grey bars + "23% 400K".
@@ -790,6 +885,10 @@ $quotaData = if (($allLayoutSegments -contains 'quota') -or
 }
 
 # ─── Fetch local git data once (skipped if git-based segments are not in any layout) ──
+if ($allLayoutSegments -contains 'git_sync') {
+    Invoke-GitFetchOncePerSession $contextPayload
+}
+
 $gitSnapshot = if (($allLayoutSegments -contains 'git_sync') -or
     ($allLayoutSegments -contains 'repo_name')) {
     Get-GitStatusSnapshot $contextPayload
