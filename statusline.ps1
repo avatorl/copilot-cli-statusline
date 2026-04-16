@@ -1,4 +1,11 @@
 # ─── Configuration ────────────────────────────────────────────────────────────
+# The status line is invoked by Copilot CLI on every refresh. Any stderr noise
+# ends up in the terminal, so we silence non-terminating errors by default and
+# wrap every risky call in try/catch further down.
+$ErrorActionPreference = 'SilentlyContinue'
+$ProgressPreference    = 'SilentlyContinue'
+$WarningPreference     = 'SilentlyContinue'
+
 # Set to $true to log raw stdin JSON to statusline.stdin.log (for debugging).
 $DebugLog = $false
 
@@ -977,111 +984,102 @@ function Get-QuotaPaceSegment($quotaData) {
 # MAIN EXECUTION
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Read and log the raw stdin payload.
-$rawStdin = Get-OptionalStdin
-Write-StdinLog $rawStdin
-$contextPayload = ConvertFrom-JsonObjectOrNull $rawStdin
+# Read and log the raw stdin payload. Every step here is wrapped defensively —
+# a status line is only useful if it never crashes the host terminal.
+$rawStdin = $null
+try { $rawStdin = Get-OptionalStdin } catch { $rawStdin = $null }
+try { Write-StdinLog $rawStdin } catch {}
+$contextPayload = $null
+try { $contextPayload = ConvertFrom-JsonObjectOrNull $rawStdin } catch { $contextPayload = $null }
+
+# ─── Build a fast lookup of layout segments (O(1) membership tests) ──────────
+# Using a HashSet avoids repeated O(n) -contains scans when deciding whether to
+# run the quota API call or the git snapshot.
+$layoutLookup = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($name in $Line1Layout) { if ($name) { [void]$layoutLookup.Add([string]$name) } }
+foreach ($name in $Line2Layout) { if ($name) { [void]$layoutLookup.Add([string]$name) } }
+foreach ($name in $Line3Layout) { if ($name) { [void]$layoutLookup.Add([string]$name) } }
 
 # ─── Fetch quota data once (skipped if quota-based segments are not in any layout) ─
 # Quota-based segments can still render even when stdin is minimal or missing because they
 # come from the live Copilot quota API rather than the session payload.
-$allLayoutSegments = $Line1Layout + $Line2Layout + $Line3Layout
-$quotaData = if (($allLayoutSegments -contains 'quota') -or
-    ($allLayoutSegments -contains 'premium_requests') -or
-    ($allLayoutSegments -contains 'premium_requests_month')) {
-    Get-CopilotQuotaData
-} else {
-    $null
+$quotaData = $null
+if ($layoutLookup.Contains('quota') -or
+    $layoutLookup.Contains('premium_requests') -or
+    $layoutLookup.Contains('premium_requests_month')) {
+    try { $quotaData = Get-CopilotQuotaData } catch { $quotaData = $null }
 }
 
 # ─── Fetch local git data once (skipped if git-based segments are not in any layout) ──
-$gitSnapshot = if (($allLayoutSegments -contains 'git_sync') -or
-    ($allLayoutSegments -contains 'git_detail') -or
-    ($allLayoutSegments -contains 'repo_name')) {
-    Get-GitStatusSnapshot $contextPayload
-} else {
-    $null
+$gitSnapshot = $null
+if ($layoutLookup.Contains('git_sync') -or
+    $layoutLookup.Contains('git_detail') -or
+    $layoutLookup.Contains('repo_name')) {
+    try { $gitSnapshot = Get-GitStatusSnapshot $contextPayload } catch { $gitSnapshot = $null }
 }
 
-if (($allLayoutSegments -contains 'git_sync') -and $gitSnapshot) {
-    Start-GitFetchRefreshInBackground $gitSnapshot
+if ($layoutLookup.Contains('git_sync') -and $gitSnapshot) {
+    try { Start-GitFetchRefreshInBackground $gitSnapshot } catch {}
 }
 
-$gitRemoteData = if (($allLayoutSegments -contains 'repo_name') -and $gitSnapshot -and $gitSnapshot.IsGitRepo) {
-    Get-GitOriginRemoteData $contextPayload
-} else {
-    $null
+$gitRemoteData = $null
+if ($layoutLookup.Contains('repo_name') -and $gitSnapshot -and $gitSnapshot.IsGitRepo) {
+    try { $gitRemoteData = Get-GitOriginRemoteData $contextPayload } catch { $gitRemoteData = $null }
 }
 
 # ─── Segment resolver ────────────────────────────────────────────────────────
 # Returns the rendered string for a named segment, or $null if unavailable.
+# Any exception inside a segment builder is swallowed and reported as $null so
+# that a single bad segment can never break the whole status line.
 function Resolve-Segment([string]$name) {
-    switch ($name) {
-        'model' {
-            $d = Get-ModelDisplayName $contextPayload
-            if ($d) { return "$cyan$d$rst" } else { return $null }
+    try {
+        switch ($name) {
+            'model' {
+                $d = Get-ModelDisplayName $contextPayload
+                if ($d) { return "$cyan$d$rst" } else { return $null }
+            }
+            'context_bar'            { return Get-ContextUsageSegment $contextPayload }
+            'last_call_tokens'       { return Get-LastCallTokensSegment $contextPayload }
+            'tokens'                 { return Get-ContextSummary $contextPayload }
+            'duration'               { return Get-TotalDurationDisplay $contextPayload }
+            'premium_requests'       { return Get-PremiumRequestsSegment $contextPayload $quotaData }
+            'premium_requests_month' { return Get-MonthlyPremiumRequestsSegment $quotaData }
+            'quota'                  { return Get-QuotaPaceSegment $quotaData }
+            'path'                   { return Get-WorkspaceDisplayPath $contextPayload }
+            'session_name'           { return Get-SessionDisplayName $contextPayload }
+            'repo_name' {
+                if ($gitRemoteData) { return $gitRemoteData.OwnerRepo }
+                return $null
+            }
+            'git_sync'               { return Get-GitSyncSegment $gitSnapshot }
+            'git_detail'             { return Get-GitDetailSegment $gitSnapshot }
+            'lines_changed'          { return Get-LinesChangedStats $contextPayload }
+            default                  { return $null }
         }
-        'context_bar' {
-            return Get-ContextUsageSegment $contextPayload
-        }
-        'last_call_tokens' {
-            return Get-LastCallTokensSegment $contextPayload
-        }
-        'tokens' {
-            return Get-ContextSummary $contextPayload
-        }
-        'duration' {
-            return Get-TotalDurationDisplay $contextPayload
-        }
-        'premium_requests' {
-            return Get-PremiumRequestsSegment $contextPayload $quotaData
-        }
-        'premium_requests_month' {
-            return Get-MonthlyPremiumRequestsSegment $quotaData
-        }
-        'quota' {
-            return Get-QuotaPaceSegment $quotaData
-        }
-        'path' {
-            return Get-WorkspaceDisplayPath $contextPayload
-        }
-        'session_name' {
-            return Get-SessionDisplayName $contextPayload
-        }
-        'repo_name' {
-            if ($gitRemoteData) { return $gitRemoteData.OwnerRepo }
-            return $null
-        }
-        'git_sync' {
-            return Get-GitSyncSegment $gitSnapshot
-        }
-        'git_detail' {
-            return Get-GitDetailSegment $gitSnapshot
-        }
-        'lines_changed' {
-            return Get-LinesChangedStats $contextPayload
-        }
-        default {
-            return $null
-        }
+    } catch {
+        # Never let a failing segment bring down the status line.
+        return $null
     }
 }
 
 # ─── Build and output each line ──────────────────────────────────────────────
-$line1Segments = $Line1Layout | ForEach-Object { Resolve-Segment $_ }
-$line2Segments = $Line2Layout | ForEach-Object { Resolve-Segment $_ }
-$line3Segments = $Line3Layout | ForEach-Object { Resolve-Segment $_ }
+# Use plain foreach loops (faster than ForEach-Object pipeline) and guard every
+# per-segment call so one broken segment cannot take out an entire line.
+function Build-StatusLine([object[]]$layout) {
+    $segments = New-Object System.Collections.Generic.List[string]
+    foreach ($name in $layout) {
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $value = $null
+        try { $value = Resolve-Segment ([string]$name) } catch { $value = $null }
+        if ($null -ne $value) { $segments.Add([string]$value) }
+    }
+    try { return Join-StatusSegments $segments.ToArray() } catch { return $null }
+}
 
-$line1 = Join-StatusSegments $line1Segments
-$line2 = Join-StatusSegments $line2Segments
-$line3 = Join-StatusSegments $line3Segments
+$line1 = Build-StatusLine $Line1Layout
+$line2 = Build-StatusLine $Line2Layout
+$line3 = Build-StatusLine $Line3Layout
 
-if (-not [string]::IsNullOrWhiteSpace($line1)) {
-    Write-Output $line1
-}
-if (-not [string]::IsNullOrWhiteSpace($line2)) {
-    Write-Output $line2
-}
-if (-not [string]::IsNullOrWhiteSpace($line3)) {
-    Write-Output $line3
-}
+if (-not [string]::IsNullOrWhiteSpace($line1)) { try { Write-Output $line1 } catch {} }
+if (-not [string]::IsNullOrWhiteSpace($line2)) { try { Write-Output $line2 } catch {} }
+if (-not [string]::IsNullOrWhiteSpace($line3)) { try { Write-Output $line3 } catch {} }

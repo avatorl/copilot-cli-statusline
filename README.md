@@ -1,12 +1,32 @@
 # Copilot CLI Status Line
 
-A Windows PowerShell status line for [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli). It keeps the most useful session details visible in the terminal: model, context usage, last-call and cumulative token totals, API and session duration, premium requests, quota pace, current folder, session name, git repo/sync/detail status, and lines changed.
+A Windows PowerShell status line for [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli). It keeps the most useful session details visible in your terminal — all the things you'd otherwise have to guess at or calculate yourself:
+
+- which **model** is active
+- how full the **context window** is right now
+- how many **tokens** the last call used, and the running totals
+- how long your Copilot **API time** and session have been
+- how many **premium requests** you've used this session and this month
+- whether you are **ahead of or behind** your monthly quota pace
+- your current **folder**, Copilot **session name**, **git repo**, **sync state**, and **branch details**
+- how many **lines** Copilot has added and removed this session
+
+The script reads a small JSON payload that Copilot CLI pipes in on every refresh, optionally calls the Copilot quota API for monthly numbers, and prints up to three colored lines. No third-party PowerShell modules are required.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 ![PowerShell 7+](https://img.shields.io/badge/PowerShell-7%2B-5391FE)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 <img width="1905" height="181" alt="Status line screenshot" src="./assets/readme-statusline.png" />
+
+## Reliability
+
+This is a status-line script — it must never break your terminal. The script is built so that:
+
+- Every risky step (stdin read, JSON parse, quota API, git commands, individual segment builders) is wrapped in its own error handler.
+- If one segment fails for any reason, only that segment is hidden; all the other segments still render.
+- Non-terminating errors and warnings are silenced, so nothing leaks to stderr.
+- If the whole payload is missing, invalid, or not JSON at all, the script still produces what it can from the quota API and local git state.
 
 ## Quick Start
 
@@ -353,7 +373,7 @@ Copilot CLI sends a JSON payload to stdin on each refresh. Two payload shapes ar
 
 | Field | Type | Used now | Meaning |
 |-------|------|----------|---------|
-| `cost.total_api_duration_ms` | `int` | ○ | Cumulative API call time in milliseconds |
+| `cost.total_api_duration_ms` | `int` | ✅ | Cumulative API call time in milliseconds |
 | `cost.total_lines_added` | `int` | ✅ | Total lines added in this session |
 | `cost.total_lines_removed` | `int` | ✅ | Total lines removed in this session |
 | `cost.total_duration_ms` | `int` | ✅ | Total session wall-clock time in milliseconds |
@@ -372,8 +392,8 @@ Copilot CLI sends a JSON payload to stdin on each refresh. Two payload shapes ar
 | `context_window.used_percentage` | `int` | ✅ | Percent of context window used |
 | `context_window.remaining_percentage` | `int` | ○ | Percent of context window free |
 | `context_window.remaining_tokens` | `int` | ○ | Tokens still available |
-| `context_window.last_call_input_tokens` | `int` | ○ | Input tokens in the last call |
-| `context_window.last_call_output_tokens` | `int` | ○ | Output tokens in the last call |
+| `context_window.last_call_input_tokens` | `int` | ✅ | Input tokens in the last call |
+| `context_window.last_call_output_tokens` | `int` | ✅ | Output tokens in the last call |
 
 ### `context_window.current_usage`
 
