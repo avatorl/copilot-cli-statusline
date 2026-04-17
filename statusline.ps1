@@ -19,6 +19,13 @@ $DebugLog = $false
 $GitFetchRefreshSeconds = 300
 $GitFetchLockTimeoutSeconds = 600
 #
+# Quota API cache config:
+#   Copilot quota API responses are cached on disk so the status line does not
+#   block on a network call every refresh. Rendering always uses the cached
+#   value when it exists; a stale cache is still used if the live call fails.
+$QuotaCacheSeconds = 120
+$QuotaApiTimeoutSeconds = 4
+#
 # Duration fallback config:
 #   show-available = show "API X of Y" when both values exist, otherwise show whichever exists
 #   require-both   = hide the duration segment unless both API and total durations exist
@@ -824,19 +831,64 @@ function Get-GitHubAccessToken {
     return $null
 }
 
-# Queries the Copilot quota API; returns a PSCustomObject with:
+# Path to the on-disk quota cache file. Kept alongside the other statusline state.
+function Get-QuotaCachePath {
+    return (Join-Path (Get-StatuslineStateRoot) 'quota\quota.json')
+}
+
+# Reads the cached quota data from disk. Returns a PSCustomObject with an extra
+# AgeSeconds field, or $null when the cache is missing or unreadable.
+function Read-QuotaCache {
+    $path = Get-QuotaCachePath
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    try {
+        $item = Get-Item -LiteralPath $path -ErrorAction Stop
+        $raw  = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
+        $obj  = $raw | ConvertFrom-Json -ErrorAction Stop
+        if ($null -eq $obj) { return $null }
+        $age = [double]([DateTimeOffset]::UtcNow - [DateTimeOffset]$item.LastWriteTimeUtc).TotalSeconds
+        return [PSCustomObject]@{
+            UsedPct      = $obj.UsedPct
+            UsedRequests = $obj.UsedRequests
+            Entitlement  = $obj.Entitlement
+            AgeSeconds   = $age
+        }
+    } catch {
+        return $null
+    }
+}
+
+# Writes quota data to the on-disk cache. Failures are silent — caching is best effort.
+function Write-QuotaCache($quotaData) {
+    if ($null -eq $quotaData) { return }
+    $path = Get-QuotaCachePath
+    try {
+        $directory = Split-Path -Parent $path
+        if (-not (Test-Path -LiteralPath $directory)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+        $payload = [PSCustomObject]@{
+            UsedPct      = $quotaData.UsedPct
+            UsedRequests = $quotaData.UsedRequests
+            Entitlement  = $quotaData.Entitlement
+        } | ConvertTo-Json -Compress
+        Set-Content -LiteralPath $path -Value $payload -Encoding ascii -ErrorAction Stop
+    } catch {}
+}
+
+# Hits the Copilot quota API once and returns a PSCustomObject with:
 #   UsedPct      - monthly premium quota consumed as a percentage
 #   UsedRequests - monthly premium requests used (derived from entitlement + remaining %)
 #   Entitlement  - monthly premium request budget
 # Returns $null when the token is unavailable or the API call fails.
-function Get-CopilotQuotaData {
+function Invoke-CopilotQuotaApi {
     $token = Get-GitHubAccessToken
     if (-not $token) { return $null }
 
     try {
         $response = Invoke-RestMethod -Uri "https://api.github.com/copilot_internal/user" `
             -Headers @{ "Authorization" = "Bearer $token"; "Accept" = "application/json" } `
-            -TimeoutSec 5 -ErrorAction Stop
+            -TimeoutSec $script:QuotaApiTimeoutSeconds -ErrorAction Stop
 
         $snap = $response.quota_snapshots.premium_interactions
         # Guard: missing or non-numeric percent_remaining must not silently produce UsedPct=100.
@@ -859,6 +911,26 @@ function Get-CopilotQuotaData {
     } catch {}
 
     return $null
+}
+
+# Returns quota data, preferring the on-disk cache when it is fresh.
+# - Fresh cache (age < $QuotaCacheSeconds): returned immediately, no network call.
+# - Stale or missing cache: fetches from the API; on failure, falls back to a stale cache.
+# This keeps rendering fast and keeps working when the network or API is unreachable.
+function Get-CopilotQuotaData {
+    $cached = Read-QuotaCache
+    if ($null -ne $cached -and $cached.AgeSeconds -lt $script:QuotaCacheSeconds) {
+        return $cached
+    }
+
+    $fresh = Invoke-CopilotQuotaApi
+    if ($null -ne $fresh) {
+        Write-QuotaCache $fresh
+        return $fresh
+    }
+
+    # API failed: fall back to stale cache if we have one.
+    return $cached
 }
 
 # Builds the monthly premium requests segment: "123 of 1500".
@@ -976,8 +1048,18 @@ function Get-QuotaPaceSegment($quotaData) {
     }
 
     # ── On pace: deviation rounds to zero bars — within half a day of target.
+    #    Still show the premium-request delta when non-zero so users see how
+    #    many p.req. they are ahead or behind, just in the neutral pace color.
+    $onPaceHint = ""
+    if ($null -ne $entitlement) {
+        $pReq = [int][math]::Round($daysDelta / $daysInMonth * $entitlement, [System.MidpointRounding]::AwayFromZero)
+        if ($pReq -gt 0) {
+            $direction = if ($diff -gt 0) { $aheadText } elseif ($diff -lt 0) { $behindText } else { "" }
+            if ($direction) { $onPaceHint = " ($pReq p.req. $direction)" }
+        }
+    }
     $cal = "$dim$($filledChar * $todayIndex)$rst$white$darkShadeChar$rst$dim$($hatchedChar * $futureCount)$rst"
-    return "$cal $white$onPaceText$rst"
+    return "$cal $white$onPaceText$onPaceHint$rst"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════

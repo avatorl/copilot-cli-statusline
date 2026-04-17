@@ -27,6 +27,7 @@ This is a status-line script — it must never break your terminal. The script i
 - If one segment fails for any reason, only that segment is hidden; all the other segments still render.
 - Non-terminating errors and warnings are silenced, so nothing leaks to stderr.
 - If the whole payload is missing, invalid, or not JSON at all, the script still produces what it can from the quota API and local git state.
+- Quota API responses are cached on disk, so a slow or unreachable API does not slow down rendering. If the API is down, the script falls back to the last known value.
 
 ## Quick Start
 
@@ -180,6 +181,7 @@ If the quota API returns a monthly entitlement, the pace label also includes an 
 
 - For **behind**, that hint is how many premium requests you are still under pace by
 - For **ahead**, that hint is how many premium requests you are over pace by
+- For **on pace**, the hint is also shown — for example `on pace (52 p.req. behind)` — using the same neutral on-pace color, so you still see which side of target you are on. It is hidden only when the difference rounds to exactly 0 p.req.
 
 If quota lookup is unavailable, the script falls back to a dim `day/month` indicator after the calendar.
 
@@ -211,16 +213,20 @@ $Line3Layout = @(
 )
 ```
 
-You can also tune background git refresh near the top of the script:
+You can also tune background git refresh and quota caching near the top of the script:
 
 ```powershell
 $GitFetchRefreshSeconds = 300
 $GitFetchLockTimeoutSeconds = 600
+$QuotaCacheSeconds = 120
+$QuotaApiTimeoutSeconds = 4
 $DurationFallbackMode = 'show-available'
 ```
 
 - `GitFetchRefreshSeconds` = how often `git_sync` may refresh tracking refs for a repo
 - `GitFetchLockTimeoutSeconds` = when to treat an old background-fetch lock as stale
+- `QuotaCacheSeconds` = how long the on-disk quota cache stays fresh; within this window the script does not call the quota API at all
+- `QuotaApiTimeoutSeconds` = request timeout for the live quota API call; on failure the script falls back to the cached value when available
 - `DurationFallbackMode` = `show-available` to show API-only or total-only values, or `require-both` to hide `duration` unless both exist
 
 You can:
@@ -296,6 +302,7 @@ Notes:
 
 - Quota lookup is optional. The rest of the status line still works without it.
 - Quota-based segments can still render even when the session payload is minimal or empty, because they come from the live quota API.
+- Quota responses are cached on disk at `%LOCALAPPDATA%\copilot-cli-statusline\quota\quota.json` for `QuotaCacheSeconds` seconds (default 120). Fresh cache hits skip the network call entirely, so the status line stays fast. If a live call fails, the script falls back to the last cached value.
 - `repo_name` is resolved locally with `git remote get-url origin`, using `workspace.current_dir` when available.
 - `git_sync` is resolved with `git status --porcelain=2 --branch`, using `workspace.current_dir` when available.
 - When `git_sync` is enabled and the repo has an upstream, the script may start a detached `git fetch --quiet --no-tags --prune` when cached tracking refs are stale. The current render still uses local data immediately.
