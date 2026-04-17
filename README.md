@@ -181,7 +181,10 @@ If the quota API returns a monthly entitlement, the pace label also includes an 
 
 - For **behind**, that hint is how many premium requests you are still under pace by
 - For **ahead**, that hint is how many premium requests you are over pace by
-- For **on pace**, the hint is also shown — for example `on pace (52 p.req. behind)` — using the same neutral on-pace color, so you still see which side of target you are on. It is hidden only when the difference rounds to exactly 0 p.req.
+- The label color is driven by the **p.req. delta**, not by how many calendar days you are off:
+  - **green** `behind` whenever the delta is at least 1 p.req. under pace, even if it is only a fraction of a day
+  - **red** `ahead` whenever the delta is at least 1 p.req. over pace, even if it is only a fraction of a day
+  - **white** `on pace` is reserved for the exact case where the delta rounds to **0 p.req.** — no number is shown then
 
 If quota lookup is unavailable, the script falls back to a dim `day/month` indicator after the calendar.
 

@@ -943,16 +943,6 @@ function Get-MonthlyPremiumRequestsSegment($quotaData) {
     return "$($quotaData.UsedRequests) of $($quotaData.Entitlement)"
 }
 
-# Converts a pace delta into an estimated premium-request count such as " (160 p.req.)".
-# Used only when the quota API returned an entitlement value.
-function Get-PremiumRequestPaceHint($daysDelta, $entitlement, $daysInMonth) {
-    if ($null -eq $entitlement) { return "" }
-
-    $pReq = [int][math]::Round($daysDelta / $daysInMonth * $entitlement, [System.MidpointRounding]::AwayFromZero)
-    if ($pReq -le 0) { return "" }
-    return " ($pReq p.req.)"
-}
-
 # Builds the combined premium requests segment: "2/338 of 1500 p.req.".
 # Left side = this session's premium requests from Copilot CLI payload.
 # Middle = account-wide monthly used premium requests from the live quota API.
@@ -1014,52 +1004,49 @@ function Get-QuotaPaceSegment($quotaData) {
         return "$cal ${red}🔴 quota exceeded$rst"
     }
 
+    # Premium-request delta for this pace deviation (0 when entitlement is unknown).
+    # The pace label color is driven by this number, not by daysDelta:
+    #   pReq == 0  → neutral "on pace"
+    #   pReq  > 0  → green (behind) or red (ahead), even when the deviation is
+    #                too small to spill into past/future bar slots.
+    $pReq = if ($null -ne $entitlement) {
+        [int][math]::Round($daysDelta / $daysInMonth * $entitlement, [System.MidpointRounding]::AwayFromZero)
+    } else { 0 }
+
+    # ── On pace: zero p.req. delta (also the case when we have no entitlement
+    #    and the deviation rounds to nothing meaningful).
+    if ($pReq -eq 0) {
+        $cal = "$dim$($filledChar * $todayIndex)$rst$white$darkShadeChar$rst$dim$($hatchedChar * $futureCount)$rst"
+        return "$cal $white$onPaceText$rst"
+    }
+
+    $pReqHint = " ($pReq p.req.)"
+
     # ── Ahead (over pace, bad): today absorbs the remaining fraction of the day;
     #    any excess spills into future slots as red hatched bars.
     if ($diff -gt 0) {
-        $spillover = $daysDelta - (1.0 - $todayFrac)
-        $barCount  = [int][math]::Round($spillover, [System.MidpointRounding]::AwayFromZero)
-        if ($barCount -gt 0) {
-            $futureRedBars = [math]::Min($barCount, $futureCount)
-            
-            # p.req. hint: requests that exceeded expected pace.
-            $pReqHint = Get-PremiumRequestPaceHint $daysDelta $entitlement $daysInMonth
-            
-            $cal = "$dim$($filledChar * $todayIndex)$rst$red$darkShadeChar$($hatchedChar * $futureRedBars)$rst$dim$($hatchedChar * ($futureCount - $futureRedBars))$rst"
-            return "$cal $red$('{0:0.0}' -f $daysDelta)d $aheadText$pReqHint$rst"
-        }
+        $spillover     = $daysDelta - (1.0 - $todayFrac)
+        $barCount      = [int][math]::Round($spillover, [System.MidpointRounding]::AwayFromZero)
+        $futureRedBars = if ($barCount -gt 0) { [math]::Min($barCount, $futureCount) } else { 0 }
+
+        $cal = "$dim$($filledChar * $todayIndex)$rst$red$darkShadeChar$($hatchedChar * $futureRedBars)$rst$dim$($hatchedChar * ($futureCount - $futureRedBars))$rst"
+        return "$cal $red$('{0:0.0}' -f $daysDelta)d $aheadText$pReqHint$rst"
     }
 
     # ── Behind (under pace, good): today absorbs the elapsed fraction;
     #    any excess spills back into past slots as green solid bars.
     if ($diff -lt 0) {
-        $spillover = $daysDelta - $todayFrac
-        $barCount  = [int][math]::Round($spillover, [System.MidpointRounding]::AwayFromZero)
-        if ($barCount -gt 0) {
-            # Cap to available past slots; prevents bars before day 1.
-            $pastGreenBars = [math]::Min($barCount, $todayIndex)
+        $spillover     = $daysDelta - $todayFrac
+        $barCount      = [int][math]::Round($spillover, [System.MidpointRounding]::AwayFromZero)
+        $pastGreenBars = if ($barCount -gt 0) { [math]::Min($barCount, $todayIndex) } else { 0 }
 
-            # p.req. hint: requests that could have been consumed but weren't.
-            $pReqHint = Get-PremiumRequestPaceHint $daysDelta $entitlement $daysInMonth
-
-            $cal = "$dim$($filledChar * ($todayIndex - $pastGreenBars))$rst$green$($filledChar * $pastGreenBars)$darkShadeChar$rst$dim$($hatchedChar * $futureCount)$rst"
-            return "$cal $green$('{0:0.0}' -f $daysDelta)d $behindText$pReqHint$rst"
-        }
+        $cal = "$dim$($filledChar * ($todayIndex - $pastGreenBars))$rst$green$($filledChar * $pastGreenBars)$darkShadeChar$rst$dim$($hatchedChar * $futureCount)$rst"
+        return "$cal $green$('{0:0.0}' -f $daysDelta)d $behindText$pReqHint$rst"
     }
 
-    # ── On pace: deviation rounds to zero bars — within half a day of target.
-    #    Still show the premium-request delta when non-zero so users see how
-    #    many p.req. they are ahead or behind, just in the neutral pace color.
-    $onPaceHint = ""
-    if ($null -ne $entitlement) {
-        $pReq = [int][math]::Round($daysDelta / $daysInMonth * $entitlement, [System.MidpointRounding]::AwayFromZero)
-        if ($pReq -gt 0) {
-            $direction = if ($diff -gt 0) { $aheadText } elseif ($diff -lt 0) { $behindText } else { "" }
-            if ($direction) { $onPaceHint = " ($pReq p.req. $direction)" }
-        }
-    }
+    # Defensive fallback: pReq > 0 but diff is exactly 0 (rounding edge case).
     $cal = "$dim$($filledChar * $todayIndex)$rst$white$darkShadeChar$rst$dim$($hatchedChar * $futureCount)$rst"
-    return "$cal $white$onPaceText$onPaceHint$rst"
+    return "$cal $white$onPaceText$rst"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
