@@ -246,7 +246,7 @@ You can:
 | `model` | 1 | Active model name |
 | `context_bar` | 1 | Context usage bar, percent, and size |
 | `last_call_tokens` | 1 | Input and output token totals for the most recent call |
-| `tokens` | 1 | Input, output, and cached token totals |
+| `tokens` | 1 | Input, output, cached, and reasoning token totals (reasoning hidden when 0) |
 | `duration` | 1 | `API X of Y` duration display, with configurable fallback behavior |
 | `premium_requests` | 3 | Session/month-used of quota premium requests |
 | `premium_requests_month` | 1 | Monthly premium requests used out of total |
@@ -278,7 +278,7 @@ There is no automated test suite. Test by piping sample payloads into `statuslin
 
 ```powershell
 # Full payload
-'{"cwd":"D:\\TEST","session_name":"Fix quota bar math","model":{"id":"gpt-5.4","display_name":"gpt-5.4 (high)"},"workspace":{"current_dir":"D:\\TEST"},"cost":{"total_duration_ms":3241747,"total_lines_added":100,"total_lines_removed":50,"total_premium_requests":5},"context_window":{"total_input_tokens":1744196,"total_output_tokens":26870,"total_cache_read_tokens":85000,"total_cache_write_tokens":12000,"context_window_size":400000,"used_percentage":22}}' | pwsh -NoProfile -File .\statusline.ps1
+'{"cwd":"D:\\TEST","session_name":"Fix quota bar math","model":{"id":"gpt-5.4","display_name":"gpt-5.4 (high)"},"workspace":{"current_dir":"D:\\TEST"},"cost":{"total_duration_ms":3241747,"total_lines_added":100,"total_lines_removed":50,"total_premium_requests":5},"context_window":{"total_input_tokens":1744196,"total_output_tokens":26870,"total_cache_read_tokens":85000,"total_cache_write_tokens":12000,"total_reasoning_tokens":4200,"context_window_size":400000,"used_percentage":22}}' | pwsh -NoProfile -File .\statusline.ps1
 
 # Minimal payload
 '{"context_window":{"context_window_size":400000,"used_percentage":0}}' | pwsh -NoProfile -File .\statusline.ps1
@@ -397,6 +397,7 @@ Copilot CLI sends a JSON payload to stdin on each refresh. Two payload shapes ar
 | `context_window.total_output_tokens` | `int` | ✅ | Cumulative output tokens |
 | `context_window.total_cache_read_tokens` | `int` | ✅ | Tokens served from cache |
 | `context_window.total_cache_write_tokens` | `int` | ✅ | Tokens written to cache |
+| `context_window.total_reasoning_tokens` | `int` | ✅ | Cumulative reasoning ("thinking") tokens (rendered as `reason N`, hidden when 0) |
 | `context_window.total_tokens` | `int` | ○ | Sum of input and output tokens |
 | `context_window.context_window_size` | `int` | ✅ | Max context window size |
 | `context_window.used_percentage` | `int` | ✅ | Percent of context window used |

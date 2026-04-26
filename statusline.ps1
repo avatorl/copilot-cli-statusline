@@ -770,6 +770,8 @@ function Get-ContextSummary($payload) {
         ($cacheRead ?? 0) + ($cacheWrite ?? 0)
     } else { $null }
 
+    $reasoningTokens = ConvertTo-NullableInt $payload.context_window.total_reasoning_tokens
+
     $segments = New-Object System.Collections.Generic.List[string]
     $in = Format-ColoredToken "in" $inputTokens
     if ($in) { $segments.Add($in) }
@@ -777,6 +779,10 @@ function Get-ContextSummary($payload) {
     if ($out) { $segments.Add($out) }
     $cached = Format-ColoredToken "cached" $cachedTokens
     if ($cached) { $segments.Add($cached) }
+    if ($null -ne $reasoningTokens -and $reasoningTokens -gt 0) {
+        $reason = Format-ColoredToken "reason" $reasoningTokens
+        if ($reason) { $segments.Add($reason) }
+    }
     return [string]::Join(" ", $segments)
 }
 
