@@ -633,11 +633,29 @@ function Get-SessionDisplayName($payload) {
     return $null
 }
 
-# Returns model.display_name, falling back to model.id.
+# Returns text safe for a single status-line segment.
+function ConvertTo-SafeStatusText([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+
+    $text = $value.Normalize([System.Text.NormalizationForm]::FormKC)
+    $text = [regex]::Replace($text, '[\p{C}\p{Zs}\p{Zl}\p{Zp}]+', ' ')
+    $text = [regex]::Replace($text, '\s+', ' ').Trim()
+
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+    return $text
+}
+
+# Returns sanitized model.display_name, falling back to model.id.
 function Get-ModelDisplayName($payload) {
     if ($payload -and $payload.model) {
-        if ($payload.model.display_name) { return [string]$payload.model.display_name }
-        if ($payload.model.id) { return [string]$payload.model.id }
+        if ($payload.model.display_name) {
+            $displayName = ConvertTo-SafeStatusText ([string]$payload.model.display_name)
+            if ($displayName) { return $displayName }
+        }
+        if ($payload.model.id) {
+            $modelId = ConvertTo-SafeStatusText ([string]$payload.model.id)
+            if ($modelId) { return $modelId }
+        }
     }
     return $null
 }

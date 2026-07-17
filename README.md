@@ -117,7 +117,7 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statu
 
 | Segment | Meaning | Notes |
 |---------|---------|-------|
-| **Model** | The active model | Rendered in cyan |
+| **Model** | The active model | Rendered in cyan; hidden/control separators in the display name are normalized to plain spaces |
 | **Context usage** | How full the current context window is | Shows a 10-cell bar, rounded percent, and window size |
 | **Last-call tokens** | Input/output tokens for the most recent request | Hidden until the payload includes last-call counts |
 | **Tokens** | Total input, output, and cached tokens so far | `cached` = cache reads + cache writes |
@@ -371,7 +371,7 @@ Copilot CLI sends a JSON payload to stdin on each refresh. Two payload shapes ar
 | Field | Type | Used now | Meaning |
 |-------|------|----------|---------|
 | `model.id` | `string` | ✅ | Model identifier such as `gpt-5.4` |
-| `model.display_name` | `string` | ✅ | Friendly display name |
+| `model.display_name` | `string` | ✅ | Friendly display name, sanitized before rendering so hidden/control separators do not appear in the status line |
 
 ### `workspace`
 
