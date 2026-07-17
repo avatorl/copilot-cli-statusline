@@ -37,7 +37,7 @@ $DurationFallbackMode = 'show-available'
 #   last_call_tokens   - Token counts for the most recent call
 #   tokens             - Cumulative input / output token counts
 #   duration           - API duration plus total session duration
-#   premium_requests   - Session/month-used of quota premium requests (p.req.)
+#   premium_requests   - Session/month-used of quota premium requests (credits)
 #   premium_requests_month - Monthly premium requests used of total
 #   quota              - Monthly quota pacing bar (fetches GitHub API)
 #
@@ -83,7 +83,7 @@ $Line3Layout = @(
 #         (configurable — see $Line1Layout above)
 # LINE 2: cwd path | +lines -lines | session name | repo name | git sync | git detail
 #         (configurable — see $Line2Layout above)
-# LINE 3: session/month-used of quota p.req. | quota pace
+# LINE 3: session/month-used of quota credits | quota pace
 #         (configurable — see $Line3Layout above)
 #
 # The full stdin payload field reference lives in README.md.
@@ -275,7 +275,7 @@ function Format-ColoredToken([string]$prefix, $value) {
     $formattedValue = Format-CompactTokens $number
     $coloredPrefix = "$script:dim$prefix$rst"
     
-    # "cached" values use default color (same as duration/p.req.)
+    # "cached" values use default color (same as duration/credits)
     if ($prefix -eq "cached") { return "$coloredPrefix $formattedValue" }
     
     $color = Get-TokenAnsiColor $number
@@ -949,7 +949,7 @@ function Get-MonthlyPremiumRequestsSegment($quotaData) {
     return "$($quotaData.UsedRequests) of $($quotaData.Entitlement)"
 }
 
-# Builds the combined premium requests segment: "2/338 of 1500 p.req.".
+# Builds the combined premium requests segment: "2/338 of 1500 credits".
 # Left side = this session's premium requests from Copilot CLI payload.
 # Middle = account-wide monthly used premium requests from the live quota API.
 # "of" value = monthly premium request budget from the live quota API.
@@ -967,7 +967,7 @@ function Get-PremiumRequestsSegment($payload, $quotaData) {
     $sessionText = if ($null -ne $sessionRequests) { "$sessionRequests" } else { "?" }
     $monthUsedText = if ($null -ne $monthUsed) { "$monthUsed" } else { "?" }
     $entitlementText = if ($null -ne $entitlement) { "$entitlement" } else { "?" }
-    return "$sessionText$slash$monthUsedText of $entitlementText p.req."
+    return "$sessionText$slash$monthUsedText of $entitlementText credits"
 }
 
 # Builds the quota pace segment using a month-length calendar overlay.
@@ -1019,14 +1019,14 @@ function Get-QuotaPaceSegment($quotaData) {
         [int][math]::Round($daysDelta / $daysInMonth * $entitlement, [System.MidpointRounding]::AwayFromZero)
     } else { 0 }
 
-    # ── On pace: zero p.req. delta (also the case when we have no entitlement
+    # ── On pace: zero credits delta (also the case when we have no entitlement
     #    and the deviation rounds to nothing meaningful).
     if ($pReq -eq 0) {
         $cal = "$dim$($filledChar * $todayIndex)$rst$white$darkShadeChar$rst$dim$($hatchedChar * $futureCount)$rst"
         return "$cal $white$onPaceText$rst"
     }
 
-    $pReqHint = " ($pReq p.req.)"
+    $pReqHint = " ($pReq credits)"
 
     # ── Ahead (over pace, bad): today absorbs the remaining fraction of the day;
     #    any excess spills into future slots as red hatched bars.

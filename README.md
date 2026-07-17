@@ -100,7 +100,7 @@ Rendered example with quota data available:
 ```text
 gpt-5.4 (high) | [context bar] 22% 400K | last in 42K out 3K | in 1.7M out 27K cached 97K | API 12m of 54m
 D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline | 🟢 synced | main +1 ~2 ?3
-5/342 of 1500 p.req. | [quota calendar] 3.2d behind (160 p.req.)
+5/342 of 1500 credits | [quota calendar] 3.2d behind (160 credits)
 ```
 
 Rendered example when quota lookup is unavailable:
@@ -108,7 +108,7 @@ Rendered example when quota lookup is unavailable:
 ```text
 gpt-5.4 (high) | [context bar] 22% 400K | last in 42K out 3K | in 1.7M out 27K cached 97K | API 12m of 54m
 D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statusline | 🟢 synced | main
-5/? of ? p.req. | [quota calendar] 15/30
+5/? of ? credits | [quota calendar] 15/30
 ```
 
 **Note:** bracketed labels such as `[context bar]` and `[quota calendar]` are readable stand-ins for the real Unicode/ANSI chart output used by the script.
@@ -138,14 +138,14 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statu
 
 | Segment | Meaning | Notes |
 |---------|---------|-------|
-| **Premium requests** | `session/month-used of quota p.req.` | Session count, monthly used count, and monthly quota in one compact segment |
+| **Premium requests** | `session/month-used of quota credits` | Session count, monthly used count, and monthly quota in one compact segment |
 | **Quota pace** | Whether you are under, on, or over monthly quota pace | Uses a compact month-shaped calendar |
 
 ## Understanding Premium Request Numbers
 
 The premium request display is the easiest part to misread:
 
-- `5/342 of 1500 p.req.` means **5 premium requests in this session**, **342 used this month**, and **1500 available for the month**
+- `5/342 of 1500 credits` means **5 premium requests in this session**, **342 used this month**, and **1500 available for the month**
 - The **left** number comes from the Copilot CLI session payload: `cost.total_premium_requests`
 - The **middle** number comes from the live GitHub Copilot quota API and shows monthly used requests
 - The **`of`** number comes from the same quota API and shows the monthly entitlement
@@ -154,9 +154,9 @@ That means the session count and monthly values can move independently.
 
 Examples:
 
-- `5/342 of 1500 p.req.` — all values are available
-- `5/? of ? p.req.` — session count is available, monthly quota lookup failed
-- `?/342 of 1500 p.req.` — session payload does not include the session count yet, but quota lookup succeeded
+- `5/342 of 1500 credits` — all values are available
+- `5/? of ? credits` — session count is available, monthly quota lookup failed
+- `?/342 of 1500 credits` — session payload does not include the session count yet, but quota lookup succeeded
 
 ## Understanding the Quota Pace Bar
 
@@ -177,14 +177,14 @@ Legend:
 | `░` | Future day outside the pace deviation |
 | `🔴 quota exceeded` | Monthly quota is at or above 100% |
 
-If the quota API returns a monthly entitlement, the pace label also includes an estimated premium-request hint such as `(381 p.req.)`.
+If the quota API returns a monthly entitlement, the pace label also includes an estimated premium-request hint such as `(381 credits)`.
 
 - For **behind**, that hint is how many premium requests you are still under pace by
 - For **ahead**, that hint is how many premium requests you are over pace by
-- The label color is driven by the **p.req. delta**, not by how many calendar days you are off:
-  - **green** `behind` whenever the delta is at least 1 p.req. under pace, even if it is only a fraction of a day
-  - **red** `ahead` whenever the delta is at least 1 p.req. over pace, even if it is only a fraction of a day
-  - **white** `on pace` is reserved for the exact case where the delta rounds to **0 p.req.** — no number is shown then
+- The label color is driven by the **credits delta**, not by how many calendar days you are off:
+  - **green** `behind` whenever the delta is at least 1 credit under pace, even if it is only a fraction of a day
+  - **red** `ahead` whenever the delta is at least 1 credit over pace, even if it is only a fraction of a day
+  - **white** `on pace` is reserved for the exact case where the delta rounds to **0 credits** — no number is shown then
 
 If quota lookup is unavailable, the script falls back to a dim `day/month` indicator after the calendar.
 
