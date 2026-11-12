@@ -8,7 +8,7 @@ Prevent long Copilot session names from causing the status line's workspace row 
 
 Add a `$SessionNameMaxLength = 50` configuration value alongside the existing status-line layout settings. `Get-SessionDisplayName` will pass the payload's `session_name` through `ConvertTo-SafeStatusText`, then apply the limit only when the normalized name exceeds it.
 
-Names of 50 characters or fewer remain unchanged. Longer names are rendered as the first 49 characters followed by a Unicode ellipsis (`…`), for a maximum visible length of 50 characters. Missing, whitespace-only, or control-character-only names continue to omit the segment.
+Names of 50 or fewer Unicode text elements remain unchanged. A text element is a base character plus its combining marks, as identified by .NET's `StringInfo.ParseCombiningCharacters`; this prevents truncation from splitting a combined character or surrogate pair. Longer names are rendered as the first 49 text elements followed by a Unicode ellipsis (`…`), for a maximum of 50 text elements. Missing, whitespace-only, or control-character-only names continue to omit the segment.
 
 The truncation is isolated to the `session_name` segment. It does not alter payload parsing, layout behavior, or any other status-line segment.
 
