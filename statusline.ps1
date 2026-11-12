@@ -30,6 +30,8 @@ $QuotaApiTimeoutSeconds = 4
 #   show-available = show "API X of Y" when both values exist, otherwise show whichever exists
 #   require-both   = hide the duration segment unless both API and total durations exist
 $DurationFallbackMode = 'show-available'
+# Text-element cap used only when the terminal width is unavailable.
+$SessionNameMaxLength = 50
 #
 # Line 1 segment names:
 #   model              - Active model name
@@ -624,15 +626,6 @@ function Get-GitStatusSnapshot($payload) {
     return $snapshot
 }
 
-# Returns the raw human-readable session name from session_name.
-function Get-SessionDisplayName($payload) {
-    if ($payload -and $payload.session_name) {
-        $name = [string]$payload.session_name
-        if (-not [string]::IsNullOrWhiteSpace($name)) { return $name }
-    }
-    return $null
-}
-
 # Returns text safe for a single status-line segment.
 function ConvertTo-SafeStatusText([string]$value) {
     if ([string]::IsNullOrWhiteSpace($value)) { return $null }
@@ -643,6 +636,174 @@ function ConvertTo-SafeStatusText([string]$value) {
 
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }
     return $text
+}
+
+# Returns the human-readable session name from session_name.
+function Get-SessionDisplayName($payload) {
+    if ($payload -and $payload.session_name) {
+        return ConvertTo-SafeStatusText ([string]$payload.session_name)
+    }
+    return $null
+}
+
+# Removes ANSI CSI SGR sequences before terminal-cell measurement.
+function Remove-StatusLineAnsiSgr([string]$value) {
+    try {
+        if ($null -eq $value) { return $null }
+        return [regex]::Replace($value, "`e\[[0-?]*[ -/]*m", '')
+    } catch {
+        return $null
+    }
+}
+
+# Returns whether a Unicode code point is rendered as emoji for status-line width.
+function Test-StatusLineEmojiCodePoint([int]$codePoint) {
+    return (
+        ($codePoint -eq 0x20E3) -or
+        ($codePoint -ge 0x2600 -and $codePoint -le 0x27BF) -or
+        ($codePoint -ge 0x1F000 -and $codePoint -le 0x1FAFF) -or
+        ($codePoint -ge 0x1FC00 -and $codePoint -le 0x1FFFD)
+    )
+}
+
+# Returns whether a Unicode code point is East Asian wide or full-width.
+function Test-StatusLineWideCodePoint([int]$codePoint) {
+    return (
+        ($codePoint -ge 0x1100 -and $codePoint -le 0x115F) -or
+        ($codePoint -eq 0x2329) -or
+        ($codePoint -eq 0x232A) -or
+        ($codePoint -ge 0x2E80 -and $codePoint -le 0xA4CF -and $codePoint -ne 0x303F) -or
+        ($codePoint -ge 0xAC00 -and $codePoint -le 0xD7A3) -or
+        ($codePoint -ge 0xF900 -and $codePoint -le 0xFAFF) -or
+        ($codePoint -ge 0xFE10 -and $codePoint -le 0xFE19) -or
+        ($codePoint -ge 0xFE30 -and $codePoint -le 0xFE6F) -or
+        ($codePoint -ge 0xFF00 -and $codePoint -le 0xFF60) -or
+        ($codePoint -ge 0xFFE0 -and $codePoint -le 0xFFE6) -or
+        ($codePoint -ge 0x20000 -and $codePoint -le 0x2FFFD) -or
+        ($codePoint -ge 0x30000 -and $codePoint -le 0x3FFFD)
+    )
+}
+
+# Measures one StringInfo text element using the status-line terminal-cell policy.
+function Get-StatusLineTextElementWidth([string]$textElement) {
+    try {
+        if ([string]::IsNullOrEmpty($textElement)) { return 0 }
+
+        $width = 0
+        $hasEmoji = $false
+        for ($index = 0; $index -lt $textElement.Length; $index++) {
+            $codePoint = [char]$textElement[$index]
+            if ([char]::IsHighSurrogate($textElement[$index]) -and
+                ($index + 1) -lt $textElement.Length -and
+                [char]::IsLowSurrogate($textElement[$index + 1])) {
+                $codePoint = [char]::ConvertToUtf32($textElement[$index], $textElement[$index + 1])
+                $index++
+            }
+
+            if (Test-StatusLineEmojiCodePoint $codePoint) {
+                $hasEmoji = $true
+                continue
+            }
+
+            $category = if ($codePoint -le 0xFFFF) {
+                [Globalization.CharUnicodeInfo]::GetUnicodeCategory([char]$codePoint)
+            } else {
+                [Globalization.UnicodeCategory]::Surrogate
+            }
+            if ($category -in @(
+                [Globalization.UnicodeCategory]::Control,
+                [Globalization.UnicodeCategory]::Format,
+                [Globalization.UnicodeCategory]::NonSpacingMark,
+                [Globalization.UnicodeCategory]::EnclosingMark,
+                [Globalization.UnicodeCategory]::SpacingCombiningMark
+            )) {
+                continue
+            }
+
+            if (Test-StatusLineWideCodePoint $codePoint) { $width += 2 } else { $width++ }
+        }
+
+        if ($hasEmoji) { return 2 }
+        return $width
+    } catch {
+        return $null
+    }
+}
+
+# Measures visible terminal cells after stripping ANSI CSI SGR sequences.
+function Get-StatusLineCellWidth([string]$value) {
+    try {
+        $text = Remove-StatusLineAnsiSgr $value
+        if ($null -eq $text) { return $null }
+
+        $starts = [Globalization.StringInfo]::ParseCombiningCharacters($text)
+        $width = 0
+        for ($index = 0; $index -lt $starts.Length; $index++) {
+            $length = if (($index + 1) -lt $starts.Length) {
+                $starts[$index + 1] - $starts[$index]
+            } else {
+                $text.Length - $starts[$index]
+            }
+            $elementWidth = Get-StatusLineTextElementWidth $text.Substring($starts[$index], $length)
+            if ($null -eq $elementWidth) { return $null }
+            $width += $elementWidth
+        }
+        return $width
+    } catch {
+        return $null
+    }
+}
+
+# Applies the text-element fallback cap without treating it as a cell budget.
+function Get-SessionNameFallback([string]$value) {
+    try {
+        if ([string]::IsNullOrEmpty($value)) { return $null }
+        $starts = [Globalization.StringInfo]::ParseCombiningCharacters($value)
+        if ($starts.Length -le $SessionNameMaxLength) { return $value }
+        return $value.Substring(0, $starts[$SessionNameMaxLength - 1]) + '…'
+    } catch {
+        return $null
+    }
+}
+
+# Fits a session name to a supplied terminal-cell budget without splitting text elements.
+function Fit-SessionNameToWidth([string]$value, [object]$columnBudget) {
+    try {
+        if ([string]::IsNullOrEmpty($value)) { return $null }
+        if ($null -eq $columnBudget) { return Get-SessionNameFallback $value }
+
+        $budget = [int]$columnBudget
+        if ($budget -le 0) { return $null }
+
+        $width = Get-StatusLineCellWidth $value
+        if ($null -eq $width) { return $null }
+        if ($width -le $budget) { return $value }
+        if ($budget -eq 1) { return '…' }
+
+        $starts = [Globalization.StringInfo]::ParseCombiningCharacters($value)
+        $prefixWidth = 0
+        $end = 0
+        for ($index = 0; $index -lt $starts.Length; $index++) {
+            $start = $starts[$index]
+            $length = if (($index + 1) -lt $starts.Length) { $starts[$index + 1] - $start } else { $value.Length - $start }
+            $elementWidth = Get-StatusLineTextElementWidth $value.Substring($start, $length)
+            if ($null -eq $elementWidth -or ($prefixWidth + $elementWidth) -gt ($budget - 1)) { break }
+            $prefixWidth += $elementWidth
+            $end = $start + $length
+        }
+        return $value.Substring(0, $end) + '…'
+    } catch {
+        return $null
+    }
+}
+
+# Returns the current console width when it is positive and available.
+function Get-StatusLineWindowWidth {
+    try {
+        $width = [Console]::WindowWidth
+        if ($width -gt 0) { return $width }
+    } catch {}
+    return $null
 }
 
 # Returns sanitized model.display_name, falling back to model.id.
@@ -1160,12 +1321,44 @@ function Resolve-Segment([string]$name) {
 # per-segment call so one broken segment cannot take out an entire line.
 function Build-StatusLine([object[]]$layout) {
     $segments = New-Object System.Collections.Generic.List[string]
+    $sessionNameIndex = -1
     foreach ($name in $layout) {
         if ([string]::IsNullOrWhiteSpace($name)) { continue }
         $value = $null
         try { $value = Resolve-Segment ([string]$name) } catch { $value = $null }
-        if ($null -ne $value) { $segments.Add([string]$value) }
+        if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+            if ($name -eq 'session_name') { $sessionNameIndex = $segments.Count }
+            $segments.Add([string]$value)
+        }
     }
+
+    if ($sessionNameIndex -ge 0) {
+        try {
+            $fixedWidth = 0
+            for ($index = 0; $index -lt $segments.Count; $index++) {
+                if ($index -eq $sessionNameIndex) { continue }
+                $segmentWidth = Get-StatusLineCellWidth $segments[$index]
+                if ($null -eq $segmentWidth) { return Join-StatusSegments $segments.ToArray() }
+                $fixedWidth += $segmentWidth
+            }
+
+            if ($segments.Count -gt 1) {
+                $separatorWidth = Get-StatusLineCellWidth $segmentSeparator
+                if ($null -eq $separatorWidth) { return Join-StatusSegments $segments.ToArray() }
+                $fixedWidth += $separatorWidth * ($segments.Count - 1)
+            }
+
+            $windowWidth = Get-StatusLineWindowWidth
+            $budget = if ($null -ne $windowWidth) { $windowWidth - $fixedWidth } else { $null }
+            $fittedName = Fit-SessionNameToWidth $segments[$sessionNameIndex] $budget
+            if ($fittedName) {
+                $segments[$sessionNameIndex] = $fittedName
+            } else {
+                $segments.RemoveAt($sessionNameIndex)
+            }
+        } catch {}
+    }
+
     try { return Join-StatusSegments $segments.ToArray() } catch { return $null }
 }
 

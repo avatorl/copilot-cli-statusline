@@ -129,7 +129,7 @@ D:\GITHUB\my-project | +100 -50 | Fix quota bar math | avatorl/copilot-cli-statu
 |---------|---------|-------|
 | **Path** | Current working folder | Uses `cwd`, then `workspace.current_dir`, then `Get-Location` |
 | **Lines changed** | Added and removed lines in this session | Green `+N`, bright red `-N` |
-| **Session name** | Copilot's human-readable session title | Rendered exactly as Copilot sends it |
+| **Session name** | Copilot's human-readable session title | Normalized as safe single-line status text, then fitted to the terminal columns left after the other line-two segments and their separators. When needed, it ends with `…` without splitting Unicode text elements. CJK/emoji elements use two cells and combining marks use zero. `$SessionNameMaxLength` (50 text elements) is used only when terminal width is unavailable. |
 | **Repo name** | Git remote path from `origin` | Shows `owner/repo`; hidden when the folder is not a git repo or `origin` is missing |
 | **Git sync** | Whether the current branch matches its local tracking ref and whether the working tree is dirty | Rendered as its own segment using the same `|` separator as the rest of the line; a green `🟢 synced` means fully synced and clean, while a dim `⚪` plus `synced dirty`, `ahead N`, `behind N`, `diverged A/B`, or `no upstream` means the repo is not in the fully synced/clean state. Status labels use the normal value text color so they match adjacent values such as `repo_name`, except for the fully synced/clean state where `synced` is also green. Hidden outside git repos. Tracking refs refresh in the background when stale, so the status line does not pause on network calls |
 | **Git detail** | Current branch plus local change counts | Shows branch name and any conflict/staged/unstaged/untracked counts, for example `main !1 +1 ~2 ?3` where `!` = conflicts, `+` = staged, `~` = unstaged, and `?` = untracked |
@@ -280,12 +280,17 @@ There is no automated test suite. Test by piping sample payloads into `statuslin
 # Full payload
 '{"cwd":"D:\\TEST","session_name":"Fix quota bar math","model":{"id":"gpt-5.4","display_name":"gpt-5.4 (high)"},"workspace":{"current_dir":"D:\\TEST"},"cost":{"total_duration_ms":3241747,"total_lines_added":100,"total_lines_removed":50,"total_premium_requests":5},"context_window":{"total_input_tokens":1744196,"total_output_tokens":26870,"total_cache_read_tokens":85000,"total_cache_write_tokens":12000,"total_reasoning_tokens":4200,"context_window_size":400000,"used_percentage":22}}' | pwsh -NoProfile -File .\statusline.ps1
 
+# Long session name (dynamically fits the remaining columns and truncates with … when needed)
+'{"session_name":"123456789012345678901234567890123456789012345678901","context_window":{"context_window_size":400000,"used_percentage":0}}' | pwsh -NoProfile -File .\statusline.ps1
+
 # Minimal payload
 '{"context_window":{"context_window_size":400000,"used_percentage":0}}' | pwsh -NoProfile -File .\statusline.ps1
 
 # Empty stdin
 echo $null | pwsh -NoProfile -File .\statusline.ps1
 ```
+
+For session-name fitting, run the long-name sample in a narrow terminal and then in a wide terminal. Confirm that the name is shorter in the narrow terminal, grows in the wide terminal, and does not split combined characters, CJK text, or emoji. Piped/noninteractive runs use the 50-text-element fallback when terminal width is unavailable.
 
 **Important:** those sample JSON payloads only control the session-side values. If the script can reach the quota API, the monthly premium-request count and quota pace still reflect your real account.
 
